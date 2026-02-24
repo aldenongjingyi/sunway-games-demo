@@ -17,7 +17,7 @@ export default function Header({ theme, onToggleTheme }: Props) {
           className="rounded-full shrink-0"
         />
         <span className="font-semibold text-slate-900 dark:text-white text-[17px] tracking-tight">
-          Map72 Game Hub
+          Map72 Game Demo Showcase
         </span>
         <div className="flex-1" />
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />

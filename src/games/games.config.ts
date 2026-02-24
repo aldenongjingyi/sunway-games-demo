@@ -1,4 +1,6 @@
 import type { GameEntry } from '../types/game'
+import MakanBoxThumbnail from '../components/thumbnails/MakanBoxThumbnail'
+import MakanGlobeThumbnail from '../components/thumbnails/MakanGlobeThumbnail'
 
 /**
  * Central game registry — the single source of truth for all game metadata.
@@ -13,24 +15,26 @@ import type { GameEntry } from '../types/game'
  */
 export const GAMES: GameEntry[] = [
   {
-    id: 'food-card',
-    title: 'Food Randomiser',
+    id: 'makanbox',
+    title: 'MakanBox',
     description:
       'Deal a hand of random food shop cards from Sunway Pyramid. Tap a card to reveal your restaurant suggestion.',
     category: 'Randomiser',
     tags: ['casual', 'food'],
     stats: {},
-    url: 'games/card.html',
+    thumbnailComponent: MakanBoxThumbnail,
+    url: 'games/makanbox.html',
   },
   {
-    id: 'globe-spin',
-    title: 'Globe Randomiser',
+    id: 'makanglobe',
+    title: 'MakanGlobe',
     description:
       'Spin a 3D globe of food shops. Hold the button to build speed, release to discover your restaurant pick.',
     category: 'Randomiser',
     tags: ['casual', 'food', '3d'],
     stats: {},
-    url: 'games/globe.html',
+    thumbnailComponent: MakanGlobeThumbnail,
+    url: 'games/makanglobe.html',
   },
   {
     id: 'coming-soon',

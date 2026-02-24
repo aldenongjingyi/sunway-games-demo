@@ -58,7 +58,10 @@ export default function GameCard({ game }: { game: GameEntry }) {
     >
       {/* Thumbnail */}
       <div className="h-40 bg-slate-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
-        {showThumbnail ? (
+        {game.thumbnailComponent ? (
+          // SVG React component — auto-updates when the component changes
+          <game.thumbnailComponent />
+        ) : showThumbnail ? (
           <img
             src={`${import.meta.env.BASE_URL}${game.thumbnail}`}
             alt={game.title}
