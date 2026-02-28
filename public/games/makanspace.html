@@ -222,7 +222,7 @@
       100% { opacity: 0; transform: translate(-50%,-50%) scale(0.7);  }
     }
     .empty-text {
-      position: fixed;
+      position: absolute;   /* inside #stage so clip-path contains them */
       pointer-events: none;
       font-size: 20px;
       font-weight: 900;
@@ -235,10 +235,10 @@
 
     /* ── Sparkle particles ──────────────────────────────────── */
     .sparkle {
-      position: fixed;
+      position: absolute;   /* inside #stage so clip-path contains them */
       pointer-events: none;
       border-radius: 50%;
-      z-index: 300;
+      z-index: 600;
       animation: sparkle-out var(--dur, 0.6s) ease-out forwards;
     }
     @keyframes sparkle-out {
@@ -568,6 +568,7 @@
   let allShops      = [];
   let asteroids     = [];
   let trails        = []; // debris trail particles drawn on starCanvas
+  const emptyFlashing = new Set(); // locks empty asteroids against double-tap
   let selectedAst   = null;
   let running       = false;
   let lastTime      = 0;
@@ -699,6 +700,7 @@
   let   bgWisps      = [];
   let   bgShoots     = [];
   let   bgShootTimer = 0;
+  let   bgSun        = null;
 
   function initStars() {
     const stage     = document.getElementById('stage');
@@ -722,6 +724,10 @@
         });
       }
     });
+
+    // Sun — fixed, partially off top-right corner
+    // cx/cy stored as fractions so drawStars can resolve to canvas px each frame
+    bgSun = { fx: 0.88, fy: -0.18, fr: 0.38 }; // fraction of W/H
 
     // Galaxy clusters — 4 elliptical smears with colour tints
     const GCOLS = [
@@ -765,16 +771,16 @@
       [255, 165,  40],  // amber
       [140,  60, 220],  // violet
     ];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       const col = WCOLS[i % WCOLS.length];
       bgWisps.push({
         cx:         W * (0.05 + Math.random() * 0.90),
         cy:         H * (0.05 + Math.random() * 0.90),
-        rx:         W * (0.28 + Math.random() * 0.30),
-        ry:         H * (0.10 + Math.random() * 0.16),
+        rx:         W * (0.22 + Math.random() * 0.22),
+        ry:         H * (0.07 + Math.random() * 0.10),
         angle:      Math.random() * Math.PI,
         vx:         0.4 + Math.random() * 0.9,
-        alpha:      0.50 + Math.random() * 0.30,
+        alpha:      0.10 + Math.random() * 0.09,
         phase:      Math.random() * Math.PI * 2,
         phaseSpeed: 0.12 + Math.random() * 0.22,
         r: col[0], g: col[1], b: col[2],
@@ -823,6 +829,43 @@
     const ctx = starCtx;
     ctx.clearRect(0, 0, starCanvas.width, starCanvas.height);
 
+    // Sun — drawn first, deepest layer
+    if (bgSun) {
+      const W = starCanvas.width, H = starCanvas.height;
+      const sx = bgSun.fx * W, sy = bgSun.fy * H, sr = bgSun.fr * H;
+
+      // Outer corona — huge, very faint amber wash
+      const corona = ctx.createRadialGradient(sx, sy, sr * 0.4, sx, sy, sr * 2.6);
+      corona.addColorStop(0,   'rgba(255,190,70,0.13)');
+      corona.addColorStop(0.4, 'rgba(255,140,30,0.06)');
+      corona.addColorStop(1,   'rgba(255,80,10,0)');
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr * 2.6, 0, Math.PI * 2);
+      ctx.fillStyle = corona;
+      ctx.fill();
+
+      // Mid glow — orange bloom
+      const mid = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr * 1.1);
+      mid.addColorStop(0,   'rgba(255,220,130,0.55)');
+      mid.addColorStop(0.3, 'rgba(255,170,60,0.28)');
+      mid.addColorStop(0.7, 'rgba(255,110,20,0.10)');
+      mid.addColorStop(1,   'rgba(255,80,10,0)');
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr * 1.1, 0, Math.PI * 2);
+      ctx.fillStyle = mid;
+      ctx.fill();
+
+      // Core — bright white-yellow disc
+      const core = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr * 0.28);
+      core.addColorStop(0,   'rgba(255,255,235,1.0)');
+      core.addColorStop(0.5, 'rgba(255,240,170,0.85)');
+      core.addColorStop(1,   'rgba(255,200,80,0)');
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr * 0.28, 0, Math.PI * 2);
+      ctx.fillStyle = core;
+      ctx.fill();
+    }
+
     // Nebula wisps — drawn deepest, behind everything
     for (const w of bgWisps) {
       const a = w.alpha * (0.75 + 0.25 * Math.sin(w.phase));
@@ -832,7 +875,7 @@
       ctx.scale(1, w.ry / w.rx);
       const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, w.rx);
       grad.addColorStop(0,   `rgba(${w.r},${w.g},${w.b},${a.toFixed(3)})`);
-      grad.addColorStop(0.5, `rgba(${w.r},${w.g},${w.b},${(a * 0.65).toFixed(3)})`);
+      grad.addColorStop(0.35,`rgba(${w.r},${w.g},${w.b},${(a * 0.30).toFixed(3)})`);
       grad.addColorStop(1,   `rgba(${w.r},${w.g},${w.b},0)`);
       ctx.beginPath();
       ctx.arc(0, 0, w.rx, 0, Math.PI * 2);
@@ -878,9 +921,11 @@
 
   // ── Sparkle burst ─────────────────────────────────────────
   function spawnSparkles(el, color) {
+    const stage = document.getElementById('stage');
+    const sr = stage.getBoundingClientRect();
     const r  = el.getBoundingClientRect();
-    const cx = r.left + r.width  * 0.5;
-    const cy = r.top  + r.height * 0.5;
+    const cx = r.left + r.width  * 0.5 - sr.left;
+    const cy = r.top  + r.height * 0.5 - sr.top;
     for (let i = 0; i < 18; i++) {
       const ang  = (i / 18) * Math.PI * 2 + Math.random() * 0.4;
       const dist = 60 + Math.random() * 90;
@@ -897,7 +942,7 @@
         --ty:${Math.sin(ang) * dist}px;
         --dur:${dur}s;
       `;
-      document.body.appendChild(sp);
+      stage.appendChild(sp);
       setTimeout(() => sp.remove(), dur * 1000 + 50);
     }
   }
@@ -951,8 +996,9 @@
         const ncx = cl + rx, ncy = ct + ry;
         ok = placed.every(p => {
           const dx = ncx - p.cx, dy = ncy - p.cy;
-          // Ellipse overlap: conservative circle check using max radius + 3% gap
-          return Math.hypot(dx, dy) > (rx + p.rx + 3) || Math.hypot(dx / (rx + p.rx + 3), dy / (ry + p.ry + 3)) > 1;
+          // Non-touch check: center distance must exceed both outer radii + 5% gap
+          const minDist = Math.max(rx, ry) + Math.max(p.rx, p.ry) + 5;
+          return Math.hypot(dx, dy) > minDist;
         });
         if (ok) break;
       }
@@ -1012,6 +1058,7 @@
     });
     el.addEventListener('touchend', e => {
       e.preventDefault();
+      el.classList.remove('hovered'); // prevent stale hover state on touch devices
       if (!selectedAst && !el.classList.contains('dimmed')) selectAsteroid(astData);
     }, { passive: false });
 
@@ -1024,6 +1071,9 @@
   // ── Select an asteroid ────────────────────────────────────
   function selectAsteroid(astData) {
     if (astData.variant === 'empty') {
+      if (emptyFlashing.has(astData.el)) return; // prevent double-tap spam
+      emptyFlashing.add(astData.el);
+      setTimeout(() => emptyFlashing.delete(astData.el), 1200);
       playBuzz();
       if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
       flashEmpty(astData);
@@ -1063,14 +1113,16 @@
   }
 
   function flashEmpty(astData) {
+    const stage = document.getElementById('stage');
+    const sr  = stage.getBoundingClientRect();
     const r   = astData.el.getBoundingClientRect();
     const txt = document.createElement('div');
     txt.className   = 'empty-text';
     txt.textContent = 'EMPTY';
-    txt.style.left      = `${r.left + r.width  * 0.5}px`;
-    txt.style.top       = `${r.top  + r.height * 0.5}px`;
+    txt.style.left      = `${r.left + r.width  * 0.5 - sr.left}px`;
+    txt.style.top       = `${r.top  + r.height * 0.5 - sr.top}px`;
     txt.style.transform = 'translate(-50%,-50%)';
-    document.body.appendChild(txt);
+    stage.appendChild(txt);
     setTimeout(() => txt.remove(), 1100);
   }
 
@@ -1117,9 +1169,9 @@
     const pal     = PALETTE[Math.floor(Math.random() * PALETTE.length)];
     const depth   = 0.20 + Math.random() * 0.80;
     const roll    = Math.random();
-    const variant = roll < 0.12 ? 'empty'
-                  : roll < 0.26 ? 'glowing'
-                  : roll < 0.40 ? 'dim'
+    const variant = roll < 0.50 ? 'empty'
+                  : roll < 0.62 ? 'glowing'
+                  : roll < 0.74 ? 'dim'
                   : null;
 
     makeAsteroid(shop, pal, variant, depth, prefill, prefillIdx, prefillTotal);
@@ -1138,7 +1190,7 @@
     // Debris trails — spawn particles behind fast/deep asteroids
     if (!selectedAst) {
       for (const a of asteroids) {
-        if (a.depth > 0.45 && Math.random() < a.depth * 0.14) {
+        if (a.x > 0 && a.depth > 0.45 && trails.length < 300 && Math.random() < a.depth * 0.14) {
           const hex = a.pal.c.replace('#', '');
           const tr  = parseInt(hex.slice(0,2), 16);
           const tg  = parseInt(hex.slice(2,4), 16);
@@ -1234,8 +1286,11 @@
     refillQueue();
   });
 
+  let _resizeTimer = null;
   window.addEventListener('resize', () => {
-    if (running) initStars();
+    if (!running) return;
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => initStars(), 200);
   });
 
   // ── Init ──────────────────────────────────────────────────
