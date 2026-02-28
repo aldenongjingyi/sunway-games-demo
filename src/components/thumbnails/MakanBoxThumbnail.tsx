@@ -1,38 +1,38 @@
 /**
- * MakanBox thumbnail — SVG illustration derived directly from the game's visual design.
+ * MakanBox thumbnail — warm bento lunchbox scene matching the game's design.
  *
- * ─── Color tokens ────────────────────────────────────────────────────────────
- * Update these constants if the MakanBox game changes its colours or design,
- * and the thumbnail will update automatically on next build.
+ * Depicts three colourful lunchboxes with open lids on a warm cream background,
+ * matching the palette and 3D box design used by the game.
+ *
+ * Update colour tokens below if the game's palette changes.
  */
-const C = {
-  // Shared background — matches makanbox.html body gradient exactly
-  bgInner:     '#1e6b32',
-  bgMid:       '#14492a',
-  bgOuter:     '#0d2e1a',
-  // Playing card back — matches .card-back background-color
-  cardBack:    '#b71c1c',
-  // Playing card front — matches .card-front background
-  cardFront:   '#ffffff',
-  // Card logo fallback circle — matches .card-logo-fallback gradient
-  logoFrom:    '#e74c3c',
-  logoDark:    '#c0392b',
-  // Card back inner-border — matches .card-back::before border colour
-  backBorder:  'rgba(255,255,255,0.5)',
-  // Card back crosshatch — matches .card-back::before background-image opacity
-  crosshatch:  'rgba(255,255,255,0.09)',
-  // Card back "?" overlay — matches .card-back::after colour
-  questionMk:  'rgba(255,255,255,0.22)',
-} as const
 
-// Fan pivot — below the viewport so cards arc naturally upward
-const PIVOT = { x: 160, y: 255 }
+// Warm background
+const BG = {
+  inner: '#fff5e8',
+  mid:   '#fde8cf',
+  outer: '#f5c89a',
+}
 
-// Base card dimensions and position (at rotation 0)
-const CARD = { w: 52, h: 73, x: 134, y: 52, rx: 5 }
+// Three box colours (from game PALETTE indices 0, 1, 2)
+const B = {
+  orange: { c: '#FF6B35', cd: '#c94e1a', lid: '#ff8c5a', side: '#c94e1a' },
+  coral:  { c: '#EF476F', cd: '#bf2950', lid: '#f56d8a', side: '#bf2950' },
+  yellow: { c: '#FFD23F', cd: '#c49500', lid: '#ffe066', side: '#c49500' },
+}
 
-// Angles for 5 cards (left → right); last one is face-up
-const ANGLES = [-24, -12, 0, 12, 24] as const
+// Seeded stars → warm dots for background texture
+function seededDots(count: number): { x: number; y: number; r: number; a: number }[] {
+  const dots: { x: number; y: number; r: number; a: number }[] = []
+  let seed = 42
+  const rand = () => { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff }
+  for (let i = 0; i < count; i++) {
+    dots.push({ x: rand() * 320, y: rand() * 160, r: 1.2 + rand() * 2.2, a: 0.06 + rand() * 0.10 })
+  }
+  return dots
+}
+
+const DOTS = seededDots(28)
 
 export default function MakanBoxThumbnail() {
   return (
@@ -43,164 +43,119 @@ export default function MakanBoxThumbnail() {
       aria-hidden="true"
     >
       <defs>
-        {/* ── Backgrounds ── */}
-        <radialGradient id="mb-bg" cx="50%" cy="55%" r="70%">
-          <stop offset="0%"   stopColor={C.bgInner} />
-          <stop offset="60%"  stopColor={C.bgMid} />
-          <stop offset="100%" stopColor={C.bgOuter} />
+        {/* Warm cream background */}
+        <radialGradient id="mbb-bg" cx="38%" cy="35%" r="72%">
+          <stop offset="0%"   stopColor={BG.inner} />
+          <stop offset="55%"  stopColor={BG.mid}   />
+          <stop offset="100%" stopColor={BG.outer}  />
         </radialGradient>
 
-        {/* ── Card back crosshatch (replicates the CSS repeating-linear-gradient) ── */}
-        <pattern id="mb-cross" width="8" height="8" patternUnits="userSpaceOnUse">
-          {/* 45° stripe */}
-          <line x1="-1" y1="9"  x2="9" y2="-1" stroke={C.crosshatch} strokeWidth="4" />
-          {/* -45° stripe */}
-          <line x1="-1" y1="-1" x2="9" y2="9"  stroke={C.crosshatch} strokeWidth="4" />
-        </pattern>
+        {/* Warm floor shadow */}
+        <radialGradient id="mbb-floor" cx="50%" cy="100%" r="55%">
+          <stop offset="0%"   stopColor="rgba(180,100,40,0.18)" />
+          <stop offset="100%" stopColor="transparent"           />
+        </radialGradient>
 
-        {/* ── Card logo circle gradient (replicates .card-logo-fallback) ── */}
-        <linearGradient id="mb-logo" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%"   stopColor={C.logoFrom} />
-          <stop offset="100%" stopColor={C.logoDark} />
-        </linearGradient>
-
-        {/* ── Card front shine ── */}
-        <linearGradient id="mb-shine" x1="0%" y1="0%" x2="50%" y2="100%">
-          <stop offset="0%"   stopColor="white" stopOpacity="0.28" />
-          <stop offset="100%" stopColor="white" stopOpacity="0"   />
-        </linearGradient>
-
-        {/* ── Drop shadow ── */}
-        <filter id="mb-shadow" x="-25%" y="-25%" width="150%" height="150%">
-          <feDropShadow dx="2" dy="3" stdDeviation="4"
-            floodColor="#000" floodOpacity="0.45" />
-        </filter>
-
-        {/* ── Reveal glow (face-up card halo) ── */}
-        <filter id="mb-glow" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
+        {/* Drop shadow for boxes */}
+        <filter id="mbb-shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="2" dy="3" stdDeviation="4" floodColor="rgba(120,60,10,0.30)"/>
         </filter>
       </defs>
 
-      {/* ── Background ── */}
-      <rect width="320" height="160" fill="url(#mb-bg)" />
+      {/* ── Warm background ── */}
+      <rect width="320" height="160" fill="url(#mbb-bg)" />
 
-      {/* ── Felt texture — faint diagonal lines matching the game's ambience ── */}
-      <g opacity="0.04">
-        {Array.from({ length: 22 }, (_, i) => (
-          <line key={i}
-            x1={i * 18 - 60} y1="0"
-            x2={i * 18 + 50} y2="160"
-            stroke="white" strokeWidth="1"
-          />
+      {/* ── Dot texture ── */}
+      <g>
+        {DOTS.map((d, i) => (
+          <circle key={i} cx={d.x} cy={d.y} r={d.r}
+            fill="rgba(255,107,53,0.12)" opacity={d.a * 8} />
         ))}
       </g>
 
-      {/* ── Face-down cards (rendered back to front) ── */}
-      {ANGLES.slice(0, 4).map((angle, i) => (
-        <g key={i}
-          transform={`rotate(${angle}, ${PIVOT.x}, ${PIVOT.y})`}
-          filter="url(#mb-shadow)"
-        >
-          {/* Card base — dark red */}
-          <rect x={CARD.x} y={CARD.y} width={CARD.w} height={CARD.h}
-            rx={CARD.rx} fill={C.cardBack} />
+      {/* ── Floor gradient ── */}
+      <rect width="320" height="160" fill="url(#mbb-floor)" />
 
-          {/* Inner border (replicates ::before border) */}
-          <rect
-            x={CARD.x + 5} y={CARD.y + 5}
-            width={CARD.w - 10} height={CARD.h - 10}
-            rx="3" fill="none"
-            stroke={C.backBorder} strokeWidth="1.5"
-          />
-
-          {/* Crosshatch overlay (replicates ::before background-image) */}
-          <rect x={CARD.x + 5} y={CARD.y + 5}
-            width={CARD.w - 10} height={CARD.h - 10}
-            rx="3" fill="url(#mb-cross)"
-          />
-
-          {/* "?" centre (replicates ::after content:'?') */}
-          <text
-            x={CARD.x + CARD.w / 2}
-            y={CARD.y + CARD.h / 2 + 1}
-            textAnchor="middle" dominantBaseline="middle"
-            fontSize="26" fontWeight="700"
-            fill={C.questionMk}
-            fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
-          >?</text>
-
-          {/* Shine */}
-          <rect x={CARD.x} y={CARD.y} width={CARD.w} height={CARD.h}
-            rx={CARD.rx} fill="url(#mb-shine)" />
+      {/* ── Box A — orange, centre-front (open) ── */}
+      <g filter="url(#mbb-shadow)">
+        {/* Box body */}
+        <rect x="122" y="96" width="76" height="46" rx="7"
+          fill={B.orange.c} />
+        {/* Box side (right) */}
+        <polygon points="198,96 206,88 206,134 198,142"
+          fill={B.orange.side} />
+        {/* Box top (top face) */}
+        <polygon points="122,96 130,88 206,88 198,96"
+          fill={B.orange.lid} />
+        {/* Inner shadow */}
+        <rect x="122" y="96" width="76" height="16" rx="7"
+          fill="rgba(0,0,0,0.10)" />
+        {/* Question mark */}
+        <text x="160" y="126" textAnchor="middle" dominantBaseline="middle"
+          fontSize="26" fontWeight="900" fill="rgba(255,255,255,0.94)"
+          fontFamily="-apple-system, BlinkMacSystemFont, sans-serif">?</text>
+        {/* Lid — tilted open above box */}
+        <g transform="translate(160,90) rotate(-32) translate(-38,-10)">
+          <rect x="0" y="0" width="76" height="18" rx="7"
+            fill={B.orange.lid} />
+          <polygon points="76,0 84,-8 84,10 76,18"
+            fill={B.orange.side} />
+          <rect x="0" y="0" width="76" height="7" rx="7"
+            fill="rgba(255,255,255,0.18)" />
         </g>
-      ))}
-
-      {/* ── Face-up card glow halo (rendered before the card so it sits behind) ── */}
-      <g transform={`rotate(${ANGLES[4]}, ${PIVOT.x}, ${PIVOT.y})`}>
-        <rect
-          x={CARD.x - 7} y={CARD.y - 7}
-          width={CARD.w + 14} height={CARD.h + 14}
-          rx={CARD.rx + 4}
-          fill={C.logoFrom} opacity="0.35"
-          filter="url(#mb-glow)"
-        />
       </g>
 
-      {/* ── Face-up card (revealed) ── */}
-      <g transform={`rotate(${ANGLES[4]}, ${PIVOT.x}, ${PIVOT.y})`}
-        filter="url(#mb-shadow)"
-      >
-        {/* Card face — white */}
-        <rect x={CARD.x} y={CARD.y} width={CARD.w} height={CARD.h}
-          rx={CARD.rx} fill={C.cardFront} />
-
-        {/* Logo fallback circle — gradient circle (replicates .card-logo-fallback) */}
-        <circle
-          cx={CARD.x + CARD.w / 2}
-          cy={CARD.y + CARD.h / 2 - 4}
-          r={17}
-          fill="url(#mb-logo)"
-        />
-
-        {/* Restaurant initial "M" inside the circle */}
-        <text
-          x={CARD.x + CARD.w / 2}
-          y={CARD.y + CARD.h / 2 - 3}
-          textAnchor="middle" dominantBaseline="middle"
-          fontSize="17" fontWeight="700" fill="white"
-          fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
-        >M</text>
-
-        {/* Venue name hint */}
-        <text
-          x={CARD.x + CARD.w / 2}
-          y={CARD.y + CARD.h - 10}
-          textAnchor="middle"
-          fontSize="6.5" fontWeight="600" fill="#999"
-          fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
-          letterSpacing="0.5"
-        >SUNWAY</text>
-
-        {/* Top-left corner mark (replicates standard playing card corner) */}
-        <text
-          x={CARD.x + 5} y={CARD.y + 12}
-          fontSize="9" fontWeight="700" fill={C.logoFrom}
-          fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
-        >M</text>
-
-        {/* Shine overlay */}
-        <rect x={CARD.x} y={CARD.y} width={CARD.w} height={CARD.h}
-          rx={CARD.rx} fill="url(#mb-shine)" />
+      {/* ── Box B — coral, upper-left (open) ── */}
+      <g filter="url(#mbb-shadow)">
+        <rect x="30" y="76" width="52" height="34" rx="5"
+          fill={B.coral.c} />
+        <polygon points="82,76 88,70 88,110 82,110"
+          fill={B.coral.side} />
+        <polygon points="30,76 36,70 88,70 82,76"
+          fill={B.coral.lid} />
+        <rect x="30" y="76" width="52" height="12" rx="5"
+          fill="rgba(0,0,0,0.09)" />
+        <text x="56" y="97" textAnchor="middle" dominantBaseline="middle"
+          fontSize="17" fontWeight="900" fill="rgba(255,255,255,0.92)"
+          fontFamily="-apple-system, BlinkMacSystemFont, sans-serif">?</text>
+        {/* Lid open */}
+        <g transform="translate(56,68) rotate(-28) translate(-26,-7)">
+          <rect x="0" y="0" width="52" height="13" rx="5"
+            fill={B.coral.lid} />
+          <polygon points="52,0 58,-6 58,7 52,13"
+            fill={B.coral.side} />
+          <rect x="0" y="0" width="52" height="5" rx="5"
+            fill="rgba(255,255,255,0.18)" />
+        </g>
       </g>
 
-      {/* ── Floor reflection glow ── */}
-      <ellipse cx="170" cy="155" rx="95" ry="9"
-        fill={C.logoFrom} opacity="0.07" />
+      {/* ── Box C — yellow, lower-right (open) ── */}
+      <g filter="url(#mbb-shadow)">
+        <rect x="226" y="90" width="62" height="42" rx="6"
+          fill={B.yellow.c} />
+        <polygon points="288,90 295,83 295,132 288,132"
+          fill={B.yellow.side} />
+        <polygon points="226,90 233,83 295,83 288,90"
+          fill={B.yellow.lid} />
+        <rect x="226" y="90" width="62" height="14" rx="6"
+          fill="rgba(0,0,0,0.09)" />
+        <text x="257" y="114" textAnchor="middle" dominantBaseline="middle"
+          fontSize="20" fontWeight="900" fill="rgba(255,255,255,0.92)"
+          fontFamily="-apple-system, BlinkMacSystemFont, sans-serif">?</text>
+        {/* Lid open */}
+        <g transform="translate(257,83) rotate(-30) translate(-31,-8)">
+          <rect x="0" y="0" width="62" height="15" rx="6"
+            fill={B.yellow.lid} />
+          <polygon points="62,0 69,-7 69,8 62,15"
+            fill={B.yellow.side} />
+          <rect x="0" y="0" width="62" height="6" rx="6"
+            fill="rgba(255,255,255,0.18)" />
+        </g>
+      </g>
+
+      {/* ── Ambient warm glow at bottom ── */}
+      <ellipse cx="160" cy="158" rx="130" ry="10"
+        fill="rgba(255,107,53,0.10)" />
     </svg>
   )
 }

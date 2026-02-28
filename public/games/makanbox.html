@@ -34,20 +34,19 @@
       50%       { transform: translateY(-16px) rotate(7deg) scale(1.04); }
     }
 
-    /* Dot pattern overlay */
+    /* Dot pattern overlay — very faint so it doesn't fight the floor */
     body::before {
       content: '';
       position: fixed; inset: 22px; z-index: 0;
       border-radius: 18px;
-      background-image: radial-gradient(circle, rgba(255,107,53,0.09) 1.5px, transparent 1.5px);
+      background-image: radial-gradient(circle, rgba(255,107,53,0.045) 1.5px, transparent 1.5px);
       background-size: 28px 28px;
       pointer-events: none;
     }
 
     /* ── Stage ──────────────────────────────────────────────
-       clip-path is used in addition to overflow:hidden
-       because overflow:hidden alone does not clip children
-       that have CSS filter applied (Chrome/WebKit bug).    */
+       Solid warm-white wall colour as the base. The floor
+       element paints over the lower portion.               */
     #stage {
       position: fixed;
       inset: 22px;
@@ -55,6 +54,50 @@
       border-radius: 18px;
       overflow: hidden;
       clip-path: inset(0 round 18px);
+      background: #FFF8EF;
+    }
+
+    /* Subtle inner-edge vignette — keeps the scene contained */
+    #stage::before {
+      content: '';
+      position: absolute; inset: 0; z-index: 100;
+      pointer-events: none;
+      box-shadow: inset 0 0 90px rgba(100, 50, 10, 0.07);
+    }
+
+    /* ── Floor plane ────────────────────────────────────────
+       A solid (non-transparent) warm sand-to-amber gradient.
+       Starts at 28% from stage top — the horizon sits at
+       ~11% in the scatter algorithm so boxes always land on
+       this floor. Distinct from the cream wall above so the
+       two-zone room reads at a glance.                     */
+    #floor-plane {
+      position: absolute;
+      left: 0; right: 0;
+      top: 28%; bottom: 0;
+      z-index: 0;
+      pointer-events: none;
+      background: linear-gradient(
+        to bottom,
+        #F2D898  0%,   /* light warm sand at horizon */
+        #E3C070 45%,   /* mid honey */
+        #C8A040 100%   /* deep amber near viewer */
+      );
+    }
+    /* Horizon crease — clean visual break between wall and floor */
+    #floor-plane::before {
+      content: '';
+      position: absolute;
+      top: -2px; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(to right,
+        transparent,
+        rgba(155, 92, 18, 0.55) 18%,
+        rgba(155, 92, 18, 0.72) 50%,
+        rgba(155, 92, 18, 0.55) 82%,
+        transparent
+      );
+      box-shadow: 0 2px 24px rgba(155, 92, 18, 0.22);
     }
 
     /* ── Cartoony frame ─────────────────────────────────────
@@ -72,16 +115,16 @@
       inset: 22px;
       z-index: 50;
       border-radius: 18px;
-      border: 9px solid #3d1a06;
+      border: 6px solid #3d1a06;
       box-shadow:
         /* white highlight just inside the stroke */
-        inset 0 0 0 2px rgba(255,255,255,0.82),
+        inset 0 0 0 1.5px rgba(255,255,255,0.75),
         /* orange accent band */
-        inset 0 0 0 5px #FF6B35,
+        inset 0 0 0 3.5px #FF6B35,
         /* thin dark inner hairline */
-        inset 0 0 0 7px #3d1a06,
+        inset 0 0 0 5px #3d1a06,
         /* outer warm-brown halo */
-        0 0 0 3px #3d1a06,
+        0 0 0 2px #3d1a06,
         /* flood the gap to the window edge */
         0 0 0 22px var(--makan-bg);
       pointer-events: none;
@@ -89,103 +132,251 @@
     }
 
     /* ── Box ────────────────────────────────────────────────
-       translate(-50%,-50%) centres the box on its absolute
-       left/top anchor. perspective(900px) in the transform
-       gives each box an independent vanishing point for the
-       hover tilt. perspective: 700px property gives the lid
-       its own perspective for the flip.                    */
+       .box is the hit-target and CSS-var holder.
+       .b-scene (child) owns the 3D transform so that
+       CSS filter on .box.dimmed doesn't flatten preserve-3d. */
     .box {
-      --lift:  0px;
-      --scl:   1;
-      --tx:    0deg;
-      --ty:    0deg;
-      --rot:   0deg;
-      --depth: 1;        /* 0.62–1.0, set per-box by JS */
+      --lift:     0px;
+      --scl:      1;
+      --tx:       0deg;
+      --ty:       0deg;
+      --rot:      0deg;
+      --bx:       10deg;  /* floor tilt X — per-box random */
+      --by:      -18deg;  /* floor tilt Y — negative → left face toward viewer */
+      --depth:    1;      /* 0.38–1.0, set per-box by JS */
+      --sdw:      8px;
+      --sbl:      10px;
+      --sda:      0.16;
+      --sda2:     0.08;
+      --bd:       30px;   /* box depth — overridden per size class */
+      --fall-dur: 620ms;
+      --fall-del: 0ms;
 
       position: absolute;
+      cursor: pointer;
+      transform: translate(-50%, -50%);
+    }
+
+    /* ── 3D scene wrapper ───────────────────────────────────
+       All 3D transforms live here. Keeping filter on .box
+       (not here) means .box.dimmed's filter is applied after
+       the 3D is composited — preserve-3d still works.      */
+    .b-scene {
+      transform-style: preserve-3d;
+      transform: perspective(900px) rotate(var(--rot))
+                 translateY(var(--lift)) scale(calc(var(--depth) * var(--scl)))
+                 rotateX(calc(var(--bx) + var(--tx))) rotateY(calc(var(--by) + var(--ty)));
+      transition:
+        transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
+        opacity   0.28s ease;
+      will-change: transform;
       display: flex;
       flex-direction: column;
       align-items: center;
-      cursor: pointer;
-      perspective: 700px;
-      transform: translate(-50%,-50%) perspective(900px) rotate(var(--rot))
-                 translateY(var(--lift)) scale(calc(var(--depth) * var(--scl)))
-                 rotateX(var(--tx)) rotateY(var(--ty));
-      transition:
-        transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
-        filter    0.28s ease;
-      will-change: transform;
-      /* Directional drop-shadow — light from top-left */
-      filter: drop-shadow(4px 14px 8px rgba(45,21,6,0.22));
     }
 
-    /* Deeper shadow lifts on hover */
-    .box.hovered {
-      filter: drop-shadow(6px 24px 14px rgba(45,21,6,0.30));
-    }
+    /* Bento-style proportions: wider than tall, like a real lunchbox container */
+    .box.xs  { --bw: 70px;  --bh: 42px;  --lh: 14px; --qs: 20px; --bd: 22px; }
+    .box.sm  { --bw: 90px;  --bh: 54px;  --lh: 18px; --qs: 26px; --bd: 28px; }
+    .box.md  { --bw: 112px; --bh: 68px;  --lh: 22px; --qs: 32px; --bd: 36px; }
+    .box.lg  { --bw: 138px; --bh: 84px;  --lh: 28px; --qs: 40px; --bd: 46px; }
+    .box.xl  { --bw: 166px; --bh: 100px; --lh: 34px; --qs: 48px; --bd: 56px; }
 
-    .box.xs  { --bw: 64px;  --bh: 48px;  --lh: 13px; --qs: 22px; }
-    .box.sm  { --bw: 82px;  --bh: 62px;  --lh: 17px; --qs: 30px; }
-    .box.md  { --bw: 104px; --bh: 78px;  --lh: 21px; --qs: 36px; }
-    .box.lg  { --bw: 128px; --bh: 96px;  --lh: 27px; --qs: 44px; }
-    .box.xl  { --bw: 156px; --bh: 116px; --lh: 33px; --qs: 54px; }
-
-    /* ── Lid ────────────────────────────────────────────────
-       transform-origin: bottom center so it hinges at the
-       seam between lid and body.                           */
+    /* ── Lid group ─────────────────────────────────────────
+       Hinges at bottom-center. transform-style: preserve-3d
+       so child faces rotate together as a 3D slab.        */
     .b-lid {
       width: calc(var(--bw) + 8px);
       height: var(--lh);
-      background: var(--cd);
-      border-radius: 6px 6px 3px 3px;
       transform-origin: bottom center;
       transition: transform 0.50s cubic-bezier(0.34, 1.56, 0.64, 1);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.16);
       position: relative; z-index: 2;
+      transform-style: preserve-3d;
     }
 
-    /* Handle pill */
+    /* Lid top face */
+    .b-lt {
+      position: absolute;
+      width: calc(var(--bw) + 8px); height: var(--bd);
+      left: 50%; top: 50%;
+      margin-left: calc((var(--bw) + 8px) / -2);
+      margin-top: calc(var(--bd) / -2);
+      transform: rotateX(90deg) translateZ(calc(var(--lh) / 2));
+      background: color-mix(in srgb, var(--cd) 85%, white);
+    }
+
+    /* Lid right face */
+    .b-lr {
+      position: absolute;
+      width: var(--bd); height: var(--lh);
+      left: 50%; top: 0;
+      margin-left: calc(var(--bd) / -2);
+      transform: rotateY(90deg) translateZ(calc((var(--bw) + 8px) / 2));
+      background: color-mix(in srgb, var(--cd) 48%, black);
+    }
+
+    /* Lid front face — smooth glossy plastic */
+    .b-lf {
+      position: absolute; inset: 0;
+      transform: translateZ(calc(var(--bd) / 2));
+      background: var(--cd);
+      border-radius: 8px 8px 2px 2px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.14);
+      overflow: hidden;
+    }
+    /* Glossy top-left sheen */
+    .b-lf::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 80% 70% at 28% 22%,
+        rgba(255,255,255,0.34) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    /* Bottom depth gradient */
+    .b-lf::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(to bottom,
+        transparent 45%, rgba(0,0,0,0.10) 100%);
+      pointer-events: none;
+    }
+
+    /* Clasp button — small circular snap latch on lid front */
     .b-hdl {
       position: absolute;
       left: 50%; top: 50%;
-      transform: translate(-50%,-50%);
-      width: 32%; height: 40%; min-height: 5px;
-      background: rgba(255,255,255,0.65);
-      border-radius: 99px;
+      transform: translate(-50%, -50%);
+      width: 12px; height: 12px;
+      background: rgba(255,255,255,0.90);
+      border-radius: 50%;
+      box-shadow:
+        0 1.5px 4px rgba(0,0,0,0.24),
+        inset 0 1px 0 rgba(255,255,255,0.70),
+        inset 0 -1px 0 rgba(0,0,0,0.08);
+      z-index: 2;
     }
 
-    /* ── Body ───────────────────────────────────────────── */
+    /* ── Left faces (visible with negative --by rotation) ─── */
+    .b-bl {
+      position: absolute;
+      width: var(--bd); height: var(--bh);
+      left: 50%; top: 0;
+      margin-left: calc(var(--bd) / -2);
+      transform: rotateY(-90deg) translateZ(calc(var(--bw) / 2));
+      background: linear-gradient(to right,
+        color-mix(in srgb, var(--c) 64%, black),
+        color-mix(in srgb, var(--c) 56%, black));
+    }
+    .b-ll {
+      position: absolute;
+      width: var(--bd); height: var(--lh);
+      left: 50%; top: 0;
+      margin-left: calc(var(--bd) / -2);
+      transform: rotateY(-90deg) translateZ(calc((var(--bw) + 8px) / 2));
+      background: linear-gradient(to right,
+        color-mix(in srgb, var(--cd) 64%, black),
+        color-mix(in srgb, var(--cd) 56%, black));
+    }
+
+    /* ── Body top (inside rim) ─────────────────────────── */
+    .b-bt {
+      position: absolute;
+      width: var(--bw); height: var(--bd);
+      left: 0; top: 50%;
+      margin-top: calc(var(--bd) / -2);
+      transform: rotateX(-90deg) translateZ(calc(var(--bh) / 2));
+      background: color-mix(in srgb, var(--c) 28%, black);
+    }
+
+    /* ── Lid inner face ─────────────────────────────────── */
+    .b-li {
+      position: absolute; inset: 0;
+      transform: rotateY(180deg) translateZ(calc(var(--bd) / 2));
+      background: color-mix(in srgb, var(--cd) 44%, black);
+      border-radius: 8px 8px 2px 2px;
+    }
+
+    /* ── Cast floor shadow ──────────────────────────────────
+       Elliptical blur below each box — strongest depth cue.
+       Fades in after landing so it doesn't show during fall. */
+    .b-shadow {
+      position: absolute;
+      bottom: -5px; left: 50%;
+      transform: translateX(-50%);
+      width: calc(var(--bw) * 0.78);
+      height: 14px;
+      background: rgba(20, 8, 0, 0.34);
+      border-radius: 50%;
+      filter: blur(8px);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.35s ease 0.08s;
+    }
+    .box:not(.falling) .b-shadow { opacity: 1; }
+    .box.dimmed .b-shadow { opacity: 0; }
+
+    /* ── Decorative band — a clean stripe around the container  */
+    .b-tape {
+      position: absolute;
+      left: 0; right: 0;
+      top: 40%; height: 18%; min-height: 5px;
+      background: rgba(255,255,255,0.16);
+      border-top:    1.5px solid rgba(255,255,255,0.36);
+      border-bottom: 1.5px solid rgba(255,255,255,0.36);
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ── Body group ─────────────────────────────────────── */
     .b-body {
       width: var(--bw);
       height: var(--bh);
+      position: relative;
+      transform-style: preserve-3d;
+    }
+
+    /* Body right face (away from viewer) */
+    .b-br {
+      position: absolute;
+      width: var(--bd); height: var(--bh);
+      left: 50%; top: 0;
+      margin-left: calc(var(--bd) / -2);
+      transform: rotateY(90deg) translateZ(calc(var(--bw) / 2));
+      background: color-mix(in srgb, var(--c) 45%, black);
+    }
+
+    /* Body front face — smooth glossy plastic lunchbox */
+    .b-bf {
+      position: absolute; inset: 0;
+      transform: translateZ(calc(var(--bd) / 2));
       background: var(--c);
-      border-radius: 0 0 6px 6px;
+      border-radius: 0 0 10px 10px;
       display: flex;
       align-items: center;
       justify-content: center;
-      position: relative;
       overflow: hidden;
       box-shadow:
-        0 8px 28px rgba(0,0,0,0.20),
-        0 2px 6px  rgba(0,0,0,0.10),
-        0 -2px 0   var(--cd) inset;
+        0 var(--sdw) var(--sbl) rgba(45,21,6,var(--sda)),
+        0 calc(var(--sdw) * 1.5) calc(var(--sbl) * 2) rgba(45,21,6,var(--sda2)),
+        inset 0 2px 0 rgba(0,0,0,0.12);
     }
-
-    /* Glass panel — mirrors the start-card aesthetic */
-    .b-body::before {
-      content: '';
-      position: absolute; inset: 8px;
-      background: rgba(255,255,255,0.13);
-      border-radius: 4px;
-      border: 1.5px solid rgba(255,255,255,0.30);
-    }
-    /* Inner dot texture */
-    .b-body::after {
+    /* Glossy top-left highlight sheen */
+    .b-bf::before {
       content: '';
       position: absolute; inset: 0;
-      background-image: radial-gradient(circle, rgba(255,255,255,0.13) 1px, transparent 1px);
-      background-size: 13px 13px;
-      border-radius: 6px;
+      background: radial-gradient(ellipse 78% 58% at 26% 16%,
+        rgba(255,255,255,0.38) 0%, transparent 64%);
+      border-radius: 0 0 10px 10px;
+      pointer-events: none;
+    }
+    /* Bottom depth vignette */
+    .b-bf::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(to bottom,
+        transparent 52%, rgba(0,0,0,0.11) 100%);
+      border-radius: 0 0 10px 10px;
+      pointer-events: none;
     }
 
     /* Label: "?" or category emoji when filtered */
@@ -193,17 +384,32 @@
       position: relative; z-index: 1;
       font-size: var(--qs);
       font-weight: 900;
-      color: rgba(255,255,255,0.92);
-      text-shadow: 0 2px 8px rgba(0,0,0,0.18);
+      color: rgba(255,255,255,0.95);
+      text-shadow: 0 2px 10px rgba(0,0,0,0.22);
       user-select: none;
     }
 
     /* ── Hovered shadow ─────────────────────────────────── */
-    .box.hovered .b-body {
+    .box.hovered .b-bf {
       box-shadow:
         0 28px 60px rgba(0,0,0,0.22),
         0 8px  20px rgba(0,0,0,0.14),
-        0 -2px 0   var(--cd) inset;
+        inset 0 2px 0 rgba(0,0,0,0.12);
+    }
+
+    /* ── Featured box — focal hierarchy ─────────────────── */
+    @keyframes featured-ring {
+      0%, 100% { box-shadow: 0 8px 28px rgba(0,0,0,0.20), 0 2px 6px rgba(0,0,0,0.10),
+                             inset 0 2px 0 rgba(0,0,0,0.12),
+                             0 0 0 3px rgba(255,205,45,0.55),
+                             0 0 12px 2px rgba(255,205,45,0.22); }
+      50%       { box-shadow: 0 8px 28px rgba(0,0,0,0.20), 0 2px 6px rgba(0,0,0,0.10),
+                             inset 0 2px 0 rgba(0,0,0,0.12),
+                             0 0 0 4px rgba(255,205,45,0.82),
+                             0 0 18px 4px rgba(255,205,45,0.35); }
+    }
+    .box.featured .b-bf {
+      animation: featured-ring 2.4s ease-in-out infinite;
     }
 
     /* ── Dimmed ─────────────────────────────────────────── */
@@ -224,9 +430,26 @@
       60%      { transform: rotateX(-4deg) translateX(0px); }
       80%      { transform: rotateX(0.5deg) translateX(-0.5px); }
     }
-    /* Rattle only when hovered and not open */
-    .box.hovered:not(.open) .b-lid {
+    .box.hovered:not(.open):not(.ajar) .b-lid {
       animation: lid-rattle 0.65s ease-in-out infinite;
+    }
+
+    /* ── Ajar: lid resting slightly open ────────────────────
+       ~25% of boxes rest with their lid back 35°, showing
+       the dark interior and adding depth variety to the scene.
+       Rattle animates around the resting angle, not zero.    */
+    .box.ajar .b-lid {
+      transform: rotateX(-35deg);
+    }
+    @keyframes lid-rattle-ajar {
+      0%,100% { transform: rotateX(-35deg) translateX(0px); }
+      20%      { transform: rotateX(-40deg) translateX(-1px); }
+      40%      { transform: rotateX(-33deg) translateX(1.5px); }
+      60%      { transform: rotateX(-39deg) translateX(0px); }
+      80%      { transform: rotateX(-33.5deg) translateX(-0.5px); }
+    }
+    .box.ajar.hovered:not(.open) .b-lid {
+      animation: lid-rattle-ajar 0.65s ease-in-out infinite;
     }
 
     /* ── Dust ring ───────────────────────────────────────── */
@@ -245,9 +468,8 @@
     }
 
     /* ── Fall animation ──────────────────────────────────
-       Include translate(-50%,-50%) and scale(var(--depth))
-       in EVERY keyframe to avoid a jump when the animation
-       ends and the CSS base transform takes over.
+       Applied to .b-scene (not .box) so the 3D context is
+       preserved. .box keeps its static translate(-50%,-50%).
 
        Per-keyframe animation-timing-function:
         0→66%  ease-in   (gravity)
@@ -255,44 +477,47 @@
        77→85%  ease-in   (back down)
        85→92%  spring    (mini bounce)
        92→100% ease-out  (settle)                         */
-    @keyframes fall-in {
+    @keyframes fall-in-scene {
       0% {
-        transform: translate(-50%,-50%) perspective(900px) rotate(var(--rot))
+        transform: perspective(900px) rotate(var(--rot))
                    translateY(-130vh) scale(var(--depth));
         opacity: 0;
         animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.5);
       }
       5%  { opacity: 1; }
       66% {
-        transform: translate(-50%,-50%) perspective(900px) rotate(var(--rot))
+        transform: perspective(900px) rotate(var(--rot))
                    translateY(0) scale(var(--depth)) scaleY(0.76) scaleX(1.18);
         animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
       }
       77% {
-        transform: translate(-50%,-50%) perspective(900px) rotate(var(--rot))
+        transform: perspective(900px) rotate(var(--rot))
                    translateY(-16px) scale(var(--depth)) scaleY(1.08) scaleX(0.95);
         animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.5);
       }
       85% {
-        transform: translate(-50%,-50%) perspective(900px) rotate(var(--rot))
+        transform: perspective(900px) rotate(var(--rot))
                    translateY(0) scale(var(--depth)) scaleY(0.95) scaleX(1.03);
         animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
       }
       92% {
-        transform: translate(-50%,-50%) perspective(900px) rotate(var(--rot))
+        transform: perspective(900px) rotate(var(--rot))
                    translateY(-5px) scale(var(--depth)) scaleY(1.01);
         animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
       }
       100% {
-        transform: translate(-50%,-50%) perspective(900px) rotate(var(--rot))
-                   translateY(0) scale(var(--depth));
+        transform: perspective(900px) rotate(var(--rot))
+                   translateY(0) scale(var(--depth))
+                   rotateX(var(--bx)) rotateY(var(--by));
         opacity: 1;
       }
     }
     .box.falling {
-      animation: fall-in 0.62s both;
       pointer-events: none !important;
       z-index: 30 !important;
+    }
+    .box.falling > .b-scene {
+      animation: fall-in-scene var(--fall-dur, 620ms) var(--fall-del, 0ms) both;
     }
 
     /* ── Filters ─────────────────────────────────────────── */
@@ -515,9 +740,6 @@
   <!-- ── SVG filter: rough ink texture for frame ────────────── -->
   <svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true">
     <defs>
-      <!-- Low-frequency turbulence + high scale = big, round,
-           balloon-like wobbles instead of scratchy texture.
-           This gives the cartoon bubble-outline feel.       -->
       <filter id="bl-ink" x="-5%" y="-5%" width="110%" height="110%"
               color-interpolation-filters="linearRGB">
         <feTurbulence type="fractalNoise" baseFrequency="0.018 0.014"
@@ -613,7 +835,9 @@
   </div>
 
   <!-- ── Stage (boxes injected by JS) ────────────────────── -->
-  <div id="stage"></div>
+  <div id="stage">
+    <div id="floor-plane"></div>
+  </div>
 
   <!-- ── Backdrop ─────────────────────────────────────────── -->
   <div id="backdrop"></div>
@@ -636,30 +860,26 @@
   'use strict';
 
   // ── Filter groups ─────────────────────────────────────────
-  // Used by getFilteredShops() for AND-between-groups logic.
-  // Within a group the union (OR) is taken; across groups the
-  // intersection (AND) is taken so "Halal + Japanese" means
-  // halal restaurants that are also Japanese, not all halal
-  // restaurants plus all Japanese restaurants.
   const FILTER_GROUPS = {
-    dietary: [724, 732, 735, 728],           // Halal, Pork Free, Veg, Kids
-    cuisine: [730, 720, 727, 729, 737, 725, 734], // Local, Chinese, JP, KR, Western, Indian, Thai
-    type:    [721, 722, 719, 718, 723, 733],  // Desserts, Drinks, Café, Bakery, Fast Food, Snack
+    dietary: [724, 732, 735, 728],
+    cuisine: [730, 720, 727, 729, 737, 725, 734],
+    type:    [721, 722, 719, 718, 723, 733],
   };
 
   // ── Palette ──────────────────────────────────────────────
-  // All boxes use the brand orange — the mystery is which
-  // restaurant is inside, not a colour signal.
   const PALETTE = [
-    { c: '#FF6B35', cd: '#e55a26' },  // brand orange
+    { c: '#FF6B35', cd: '#c94e1a' },  // brand orange
+    { c: '#EF476F', cd: '#bf2950' },  // coral pink
+    { c: '#FFD23F', cd: '#c49500' },  // golden yellow
+    { c: '#06D6A0', cd: '#04977a' },  // mint green
+    { c: '#9D4EDD', cd: '#6e2faa' },  // purple
+    { c: '#118AB2', cd: '#0d6484' },  // ocean blue
   ];
 
-  function colorForShop() { return 0; }
+  let _colorIdx = 0;
+  function colorForShop() { return _colorIdx++ % PALETTE.length; }
 
   // ── Category → display label ─────────────────────────────
-  // When filters are active: shows the type emoji so users
-  // know what category they'll get — mystery is WHICH place,
-  // not WHAT type (which they already chose via filters).
   const CAT_LABEL_PRIORITY = [
     [721,'🍰'],[722,'🥤'],[718,'🥐'],[719,'☕'],
     [727,'🍱'],[729,'🌶️'],[725,'🍛'],[720,'🥢'],
@@ -674,9 +894,14 @@
     return '?';
   }
 
-  // Varied size distribution across 5 sizes — xl/lg anchor visually,
-  // xs/sm provide contrast and fill gaps between larger boxes.
-  const SIZE_PAT = ['md','lg','sm','xl','md','xs','lg','md','sm','xl','xs','md','lg','sm','md','xl','sm','lg','xs','md','sm','md'];
+  function sizeForDepth(zFloor) {
+    const t = Math.max(0, Math.min(1, zFloor + (Math.random() - 0.5) * 0.30));
+    if (t < 0.18) return 'xs';
+    if (t < 0.38) return 'sm';
+    if (t < 0.62) return 'md';
+    if (t < 0.82) return 'lg';
+    return 'xl';
+  }
 
   // ── State ────────────────────────────────────────────────
   let allShops     = [];
@@ -685,8 +910,6 @@
 
   function getFilteredShops() {
     if (activeFilters.size === 0) return allShops;
-
-    // Bucket each active filter ID into its group
     const activeByGroup = {};
     for (const id of activeFilters) {
       for (const [group, ids] of Object.entries(FILTER_GROUPS)) {
@@ -697,10 +920,6 @@
         }
       }
     }
-
-    // AND between groups, OR within each group:
-    //   e.g. "Halal + Pork Free + Japanese" →
-    //   shop must match (Halal OR Pork Free) AND (Japanese)
     return allShops.filter(shop =>
       Object.values(activeByGroup).every(groupIds =>
         groupIds.some(id => shop.categories.includes(id))
@@ -744,20 +963,60 @@
   }
   function playThud(intensity) {
     if (!audioCtx) return;
-    const t   = audioCtx.currentTime;
-    const dur = 0.04 + intensity * 0.07;
+    const t = audioCtx.currentTime;
+    const dur = 0.06 + intensity * 0.09;
     const buf = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * dur), audioCtx.sampleRate);
     const d   = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    for (let i = 0; i < d.length; i++)
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.5);
     const src = audioCtx.createBufferSource(); src.buffer = buf;
-    const flt = audioCtx.createBiquadFilter();
-    flt.type  = 'bandpass'; flt.frequency.value = 900 - intensity * 600; flt.Q.value = 0.9;
-    const g   = audioCtx.createGain();
-    g.gain.setValueAtTime(0.06 + intensity * 0.22, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur + 0.02);
-    src.connect(flt); flt.connect(g); g.connect(audioCtx.destination);
-    src.start(t); src.stop(t + dur + 0.03);
+    const lp  = audioCtx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 190 + intensity * 90; lp.Q.value = 1.4;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.22 + intensity * 0.32, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur + 0.04);
+    src.connect(lp); lp.connect(g); g.connect(audioCtx.destination);
+    src.start(t); src.stop(t + dur + 0.05);
+
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 80 + intensity * 55;
+    const gr = audioCtx.createGain();
+    gr.gain.setValueAtTime(0, t);
+    gr.gain.linearRampToValueAtTime(0.055 + intensity * 0.065, t + 0.004);
+    gr.gain.exponentialRampToValueAtTime(0.001, t + 0.09 + intensity * 0.12);
+    osc.connect(gr); gr.connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + 0.12 + intensity * 0.14);
   }
+  function playBassThud(intensity) {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    const dur = 0.10 + intensity * 0.14;
+    const buf = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * dur), audioCtx.sampleRate);
+    const d   = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++)
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.8);
+    const src = audioCtx.createBufferSource(); src.buffer = buf;
+    const lp  = audioCtx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 110 + intensity * 50; lp.Q.value = 1.8;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.55 + intensity * 0.45, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur + 0.06);
+    src.connect(lp); lp.connect(g); g.connect(audioCtx.destination);
+    src.start(t); src.stop(t + dur + 0.08);
+
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(55 + intensity * 35, t);
+    osc.frequency.exponentialRampToValueAtTime(28 + intensity * 10, t + 0.18);
+    const gr = audioCtx.createGain();
+    gr.gain.setValueAtTime(0, t);
+    gr.gain.linearRampToValueAtTime(0.18 + intensity * 0.22, t + 0.006);
+    gr.gain.exponentialRampToValueAtTime(0.001, t + 0.20 + intensity * 0.18);
+    osc.connect(gr); gr.connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + 0.28 + intensity * 0.20);
+  }
+
   function playChime() {
     if (!audioCtx) return;
     const t = audioCtx.currentTime;
@@ -773,27 +1032,13 @@
   }
 
   // ── Scatter layout ───────────────────────────────────────
-  // Positions are stored as 0–1 fractions and applied as CSS
-  // percentages (left/top). This means boxes always fill the
-  // viewport regardless of when or how the window is resized —
-  // no rebuild needed on viewport changes.
   function computeScatter(count) {
     const W = innerWidth, H = innerHeight;
     const mobile = W <= 600;
-    const cols   = mobile ? 4 : Math.max(5, Math.round(Math.sqrt(count * W / H * 1.4)));
-    const rows   = Math.ceil(count / cols);
-
-    // Stage dimensions (inset: 22px each side)
-    const sW = W - 44, sH = H - 44;
-
-    // Safe margin in pixels: half the largest box (xl: 156×116 px) + 16px gap
-    // so no box centre can be within this distance of the stage edge.
-    const safeX = mobile ? 52 : 94;   // px from stage left/right
-    const safeY = mobile ? 42 : 74;   // px from stage top/bottom
-
-    const usableW = sW - safeX * 2;
-    const usableH = sH - safeY * 2;
-
+    const cols = mobile ? 4 : Math.max(5, Math.round(Math.sqrt(count * W / H * 0.9)));
+    const rows = Math.ceil(count / cols);
+    const horizon  = 0.11;
+    const floorBot = 0.91;
     const cells = [];
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++)
@@ -802,25 +1047,54 @@
       const j = Math.floor(Math.random() * (i + 1));
       [cells[i], cells[j]] = [cells[j], cells[i]];
     }
-
     return cells.slice(0, count).map(({ c, r }) => {
-      // Position within usable area, then offset by safe margin
-      const xPx = safeX + (c + Math.random()) / cols * usableW;
-      const yPx = safeY + (r + Math.random()) / rows * usableH;
-      // Convert to stage fractions (0–1) for CSS %
-      const xPct  = xPx / sW;
-      const yPct  = yPx / sH;
-      // depth derived from yPct — bottom boxes appear closer/larger
-      const depth = 0.58 + yPct * 0.42;         // 0.58 (far) → 1.0 (near)
+      const zFloor = (r + 0.15 + Math.random() * 0.70) / rows;
+      const yPct = horizon + (floorBot - horizon) * Math.pow(zFloor, 2);
+      const halfSpread = 0.12 + zFloor * 0.40;
+      const xFloor = (c + 0.1 + Math.random() * 0.80) / cols;
+      const xPct = 0.5 + (xFloor - 0.5) * halfSpread * 2;
+      const depth = 0.38 + zFloor * 0.62;
       return {
-        xPct, yPct, depth,
-        rot: (Math.random() - 0.5) * 14,        // ±7° scatter rotation
+        xPct, yPct, depth, zFloor,
+        rot: (Math.random() - 0.5) * 20,
       };
     });
   }
 
+  // ── Box collision separation ──────────────────────────────
+  function separatePositions(items, W, H) {
+    const FW = { xs: 130, sm: 165, md: 210, lg: 260, xl: 315 };
+    const FH = { xs: 105, sm: 135, md: 170, lg: 210, xl: 255 };
+
+    for (let iter = 0; iter < 20; iter++) {
+      for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+          const a = items[i], b = items[j];
+          const mx = (FW[a.sz] * a.pos.depth + FW[b.sz] * b.pos.depth) * 0.5;
+          const my = (FH[a.sz] * a.pos.depth + FH[b.sz] * b.pos.depth) * 0.5;
+          const dx = (b.pos.xPct - a.pos.xPct) * W;
+          const dy = (b.pos.yPct - a.pos.yPct) * H;
+          const nx = dx / mx, ny = dy / my;
+          const d2 = nx * nx + ny * ny;
+          if (d2 >= 1.0 || d2 < 1e-6) continue;
+          const d    = Math.sqrt(d2);
+          const push = (1 - d) * 0.60;
+          a.pos.xPct -= (nx / d) * push * mx / W;
+          a.pos.yPct -= (ny / d) * push * my / H;
+          b.pos.xPct += (nx / d) * push * mx / W;
+          b.pos.yPct += (ny / d) * push * my / H;
+        }
+      }
+      items.forEach(({ pos, sz }) => {
+        const hw = FW[sz] * pos.depth * 0.5 / W;
+        const hh = FH[sz] * pos.depth * 0.5 / H;
+        pos.xPct = Math.max(0.06 + hw, Math.min(0.94 - hw, pos.xPct));
+        pos.yPct = Math.max(0.14 + hh, Math.min(0.87 - hh, pos.yPct));
+      });
+    }
+  }
+
   // ── Dust puff ─────────────────────────────────────────────
-  // A brief expanding elliptical ring at the box landing point.
   function spawnDust(el) {
     const r    = el.getBoundingClientRect();
     const dust = document.createElement('div');
@@ -841,17 +1115,41 @@
     el.className = `box ${szKey}`;
     el.style.left   = `${(pos.xPct * 100).toFixed(2)}%`;
     el.style.top    = `${(pos.yPct * 100).toFixed(2)}%`;
-    el.style.zIndex = Math.round(pos.depth * 10);
+    el.style.zIndex = Math.round(pos.depth * 15);
     el.style.setProperty('--c',     c);
     el.style.setProperty('--cd',    cd);
     el.style.setProperty('--rot',   `${pos.rot}deg`);
     el.style.setProperty('--depth', pos.depth.toFixed(3));
-    el.innerHTML = `<div class="b-lid"><div class="b-hdl"></div></div>
-                    <div class="b-body"><span class="b-q">${label}</span></div>`;
+    el.style.setProperty('--bx', `${(12 + (Math.random() - 0.5) * 8).toFixed(1)}deg`);
+    el.style.setProperty('--by', `${(-18 + (Math.random() - 0.5) * 8).toFixed(1)}deg`);
+    el.style.setProperty('--sdw',  `${(pos.depth * 11).toFixed(1)}px`);
+    el.style.setProperty('--sbl',  `${(pos.depth * 14).toFixed(1)}px`);
+    el.style.setProperty('--sda',  (0.10 + pos.depth * 0.22).toFixed(3));
+    el.style.setProperty('--sda2', (0.04 + pos.depth * 0.09).toFixed(3));
+    el.style.opacity = (0.62 + pos.depth * 0.38).toFixed(2);
+    el.innerHTML = `
+      <div class="b-shadow"></div>
+      <div class="b-scene">
+        <div class="b-lid">
+          <div class="b-lt"></div>
+          <div class="b-lr"></div>
+          <div class="b-ll"></div>
+          <div class="b-li"></div>
+          <div class="b-lf"><div class="b-hdl"></div></div>
+        </div>
+        <div class="b-body">
+          <div class="b-br"></div>
+          <div class="b-bl"></div>
+          <div class="b-bt"></div>
+          <div class="b-bf">
+            <div class="b-tape"></div>
+            <span class="b-q">${label}</span>
+          </div>
+        </div>
+      </div>`;
     el._shop = shop;
     el._ci   = ci;
 
-    // Cursor-tracking 3D tilt — the core Awwwards micro-interaction
     el.addEventListener('mousemove', e => {
       if (openedBox || el.classList.contains('dimmed')) return;
       const r  = el.getBoundingClientRect();
@@ -933,38 +1231,54 @@
 
   // ── Start round ───────────────────────────────────────────
   function startRound() {
-    const stage   = document.getElementById('stage');
-    const mobile  = innerWidth <= 600;
-    const pool    = getFilteredShops();
-    const count   = Math.min(pool.length, mobile ? 24 : 44);
-    const chosen  = pickRandom(pool, count);
-    const scatter = computeScatter(count);
-    const stagger = Math.min(75, Math.max(28, 900 / count));
+    _colorIdx = 0;
+    const stage  = document.getElementById('stage');
+    const mobile = innerWidth <= 600;
+    const pool   = getFilteredShops();
+    const count  = Math.min(pool.length, mobile ? 12 : 24);
+    const chosen = pickRandom(pool, count);
+    const scatter= computeScatter(count);
+    const stagger= Math.min(75, Math.max(28, 900 / count));
 
-    stage.innerHTML = '';
+    const items = chosen.map((shop, i) => ({
+      shop,
+      pos: scatter[i],
+      sz:  sizeForDepth(scatter[i].zFloor),
+    }));
+
+    separatePositions(items, innerWidth, innerHeight);
+
+    const featureIdx = items.reduce((best, item, i) => {
+      const score  = item.pos.depth * 2 - Math.abs(item.pos.xPct - 0.5) * 2.5;
+      const bScore = items[best].pos.depth * 2 - Math.abs(items[best].pos.xPct - 0.5) * 2.5;
+      return score > bScore ? i : best;
+    }, 0);
+
+    stage.querySelectorAll('.box').forEach(b => b.remove());
     openedBox = null;
     hideReveal();
     document.getElementById('backdrop').classList.remove('visible');
     document.getElementById('repick-btn').style.display = 'none';
 
-    chosen.forEach((shop, i) => {
-      const pos  = scatter[i];
-      const sz   = SIZE_PAT[i % SIZE_PAT.length];
-      const dur  = 580 + Math.random() * 80;
-      const el   = makeBox(shop, pos, sz);
+    items.forEach(({ shop, pos, sz }, i) => {
+      const dur = 580 + Math.random() * 80;
+      const el  = makeBox(shop, pos, sz);
+      if (i === featureIdx) el.classList.add('featured');
+
+      if (i !== featureIdx && Math.random() < 0.25) el.classList.add('ajar');
 
       el.classList.add('falling');
-      el.style.animationDelay    = `${i * stagger}ms`;
-      el.style.animationDuration = `${dur}ms`;
+      el.style.setProperty('--fall-dur', `${dur}ms`);
+      el.style.setProperty('--fall-del', `${i * stagger}ms`);
 
-      // Thuds timed to squash (66%) and bounce (85%) moments
       const t0 = i * stagger;
-      setTimeout(() => playThud(0.35 + Math.random() * 0.50), t0 + dur * 0.66);
+      const bdI = 0.35 + Math.random() * 0.50;
+      setTimeout(() => { playBassThud(bdI); playThud(bdI * 0.55); }, t0 + dur * 0.66);
       setTimeout(() => playThud(0.07 + Math.random() * 0.11), t0 + dur * 0.85);
 
-      el.addEventListener('animationend', () => {
+      el.querySelector('.b-scene').addEventListener('animationend', () => {
         el.classList.remove('falling');
-        el.style.zIndex = Math.round(pos.depth * 10); // restore depth z-index
+        el.style.zIndex = Math.round(pos.depth * 15);
         spawnDust(el);
       }, { once: true });
 
@@ -978,9 +1292,12 @@
   document.getElementById('repick-btn').addEventListener('click', () => {
     dismiss();
     [...document.querySelectorAll('.box')].forEach((b, i) => {
-      b.style.transition = `opacity 0.18s ease ${i * 22}ms, transform 0.22s ease ${i * 22}ms`;
-      b.style.opacity    = '0';
-      b.style.transform  = `translate(-50%,-50%) perspective(900px) rotate(var(--rot)) translateY(22px) scale(0.86)`;
+      const scene = b.querySelector('.b-scene');
+      if (scene) {
+        scene.style.transition = `opacity 0.18s ease ${i * 22}ms, transform 0.22s ease ${i * 22}ms`;
+        scene.style.opacity    = '0';
+        scene.style.transform  = `perspective(900px) rotate(var(--rot)) translateY(22px) scale(0.86) rotateX(var(--bx)) rotateY(var(--by))`;
+      }
     });
     setTimeout(startRound, 280);
   });

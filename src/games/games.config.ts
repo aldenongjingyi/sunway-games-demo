@@ -1,6 +1,7 @@
 import type { GameEntry } from '../types/game'
 import MakanBoxThumbnail from '../components/thumbnails/MakanBoxThumbnail'
 import MakanGlobeThumbnail from '../components/thumbnails/MakanGlobeThumbnail'
+import MakanSpaceThumbnail from '../components/thumbnails/MakanSpaceThumbnail'
 
 /**
  * Central game registry — the single source of truth for all game metadata.
@@ -35,6 +36,17 @@ export const GAMES: GameEntry[] = [
     stats: {},
     thumbnailComponent: MakanGlobeThumbnail,
     url: 'games/makanglobe.html',
+  },
+  {
+    id: 'makanspace',
+    title: 'MakanSpace',
+    description:
+      'Intercept drifting cargo pods in deep space — tap one to reveal your next restaurant!',
+    category: 'Randomiser',
+    tags: ['casual', 'food', 'space'],
+    stats: {},
+    thumbnailComponent: MakanSpaceThumbnail,
+    url: 'games/makanspace.html',
   },
   {
     id: 'coming-soon',
