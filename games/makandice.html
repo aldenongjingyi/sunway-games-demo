@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>MakanDice</title>
+  <link rel="stylesheet" href="../makan-theme.css">
+  <script type="importmap">
+    {"imports":{"three":"./three.module.min.js"}}
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; font-family: var(--font); }
+
+    /* ── Game background ───────────────────────────────────── */
+    body {
+      background:
+        /* warm glow centred behind the die */
+        radial-gradient(ellipse at 50% 46%, rgba(255,107,53,0.09) 0%, transparent 52%),
+        /* accent splashes — golden bottom-left, coral top-right */
+        radial-gradient(circle at 18% 82%, rgba(255,210,63,0.07) 0%, transparent 38%),
+        radial-gradient(circle at 82% 18%, rgba(239,71,111,0.05) 0%, transparent 34%),
+        /* dot pattern (matches makan-theme) */
+        radial-gradient(circle, rgba(255,107,53,0.09) 1.5px, transparent 1.5px),
+        /* base warm cream */
+        linear-gradient(160deg, #fff9f4 0%, #fef3e8 50%, #fde8d6 100%);
+      background-size: 100% 100%, 100% 100%, 100% 100%, 28px 28px, 100% 100%;
+    }
+
+    /* ── WebGL canvas ──────────────────────────────────────── */
+    #game-scene { position: fixed; inset: 0; z-index: 1; }
+    #die-canvas {
+      width: 100%; height: 100%; display: block;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+      cursor: grab;
+    }
+    #die-canvas:active { cursor: grabbing; }
+
+    /* ── Roll hint ─────────────────────────────────────────── */
+    #roll-hint {
+      position: fixed;
+      bottom: max(13%, calc(env(safe-area-inset-bottom, 0px) + 72px));
+      left: 50%; transform: translateX(-50%);
+      z-index: 10;
+      font-size: 11px; font-weight: 800;
+      color: rgba(100, 60, 20, 0.45);
+      letter-spacing: 0.22em; text-transform: uppercase;
+      pointer-events: none; white-space: nowrap;
+      transition: opacity 0.45s ease;
+    }
+    #roll-hint.hidden { opacity: 0; }
+
+    /* ── Filters ───────────────────────────────────────────── */
+    #filter-wrap {
+      display: none; flex-direction: column; gap: 9px;
+      width: 100%; margin-top: 4px;
+    }
+    .filter-row { display: flex; align-items: flex-start; gap: 7px; }
+    .flabel {
+      font-size: 10px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.07em; color: var(--makan-text-muted);
+      min-width: 46px; padding-top: 5px; flex-shrink: 0; text-align: right;
+    }
+    .fpills { display: flex; flex-wrap: wrap; gap: 5px; }
+    .fpill {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 4px 10px; border: none; border-radius: 99px;
+      font-family: var(--font); font-size: 12px; font-weight: 700;
+      cursor: pointer;
+      background: rgba(45,21,6,0.07); color: var(--makan-text-2);
+      transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1),
+                  background 0.15s ease, box-shadow 0.15s ease;
+      user-select: none; -webkit-user-select: none;
+    }
+    .fpill:hover  { background: rgba(255,107,53,0.14); transform: scale(1.07); }
+    .fpill.active { background: var(--makan-orange); color: #fff;
+                    box-shadow: 0 2px 10px rgba(255,107,53,0.38); transform: scale(1.05); }
+    .filter-divider { width: 100%; height: 1px; background: rgba(255,107,53,0.12); margin: 2px 0; }
+    #filter-count { font-size: 12px; font-weight: 700; color: var(--makan-text-muted); text-align: center; transition: color 0.2s ease; }
+    #filter-count.empty { color: var(--makan-coral); }
+
+    /* ── Start / Loading screen ────────────────────────────── */
+    #loading-overlay {
+      position: fixed; inset: 0;
+      background: linear-gradient(160deg, #fff4e8 0%, #ffe0c4 100%);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999; transition: opacity 0.4s ease; overflow: hidden;
+    }
+    .fe {
+      position: absolute; opacity: 0.22;
+      animation: fe-float var(--d, 6s) var(--del, 0s) ease-in-out infinite;
+      user-select: none; pointer-events: none; line-height: 1;
+    }
+    @keyframes fe-float {
+      0%, 100% { transform: translateY(0) rotate(-6deg); }
+      30%       { transform: translateY(-22px) rotate(9deg) scale(1.07); }
+      65%       { transform: translateY(13px) rotate(-4deg) scale(0.95); }
+    }
+    .start-card {
+      position: relative; z-index: 1;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      background: rgba(255,255,255,0.72);
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+      border-radius: 28px; padding: 44px 54px 40px;
+      box-shadow: 0 8px 48px rgba(255,107,53,0.16), 0 2px 8px rgba(0,0,0,0.06);
+      border: 2px solid rgba(255,107,53,0.14); text-align: center;
+    }
+    .start-icon {
+      font-size: 68px; line-height: 1;
+      animation: makan-bounce-in 0.7s cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    .start-title { font-size: 46px; font-weight: 900; color: var(--makan-orange); letter-spacing: -2px; line-height: 1; margin-top: 2px; }
+    .start-rule { width: 44px; height: 4px; background: linear-gradient(90deg, var(--makan-orange), var(--makan-yellow)); border-radius: 2px; margin: 2px 0 4px; }
+    .start-sub { font-size: 15px; font-weight: 700; color: var(--makan-text-2); max-width: 230px; line-height: 1.45; }
+    #loading-state { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 4px; }
+    #loading-text { font-size: 15px; font-weight: 700; color: var(--makan-text-2); }
+    #tap-prompt {
+      display: none; margin-top: 4px;
+      font-size: 18px; font-weight: 900; cursor: pointer;
+      padding: 15px 46px;
+      background: var(--makan-orange); color: #fff;
+      border: none; border-radius: var(--r-full);
+      box-shadow: 0 4px 22px rgba(255,107,53,0.42);
+      font-family: var(--font);
+      transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.15s ease, opacity 0.2s ease;
+      user-select: none; -webkit-user-select: none;
+    }
+    #tap-prompt:not(:disabled):hover { transform: scale(1.07); box-shadow: 0 6px 32px rgba(255,107,53,0.52); }
+    #tap-prompt:disabled { cursor: not-allowed; }
+
+    /* ── Backdrop ──────────────────────────────────────────── */
+    #backdrop {
+      position: fixed; inset: 0;
+      background: rgba(30,12,4,0.65);
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      z-index: 999; opacity: 0; pointer-events: none;
+      transition: opacity 0.35s ease;
+    }
+    #backdrop.visible { opacity: 1; pointer-events: auto; cursor: pointer; }
+
+    /* ── Reveal overlay ────────────────────────────────────── */
+    #reveal-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; opacity: 0;
+      transition: opacity 0.22s ease;
+    }
+    #reveal-overlay.visible { opacity: 1; }
+    .reveal-card {
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+      padding: 52px 48px 40px; border-radius: 32px;
+      background: #ffffff;
+      box-shadow: 0 12px 64px rgba(0,0,0,0.28), 0 4px 20px rgba(0,0,0,0.14);
+      text-align: center; min-width: 280px; max-width: 380px;
+      animation: rev-pop 0.48s cubic-bezier(0.34,1.56,0.64,1) both;
+      overflow: hidden; position: relative; pointer-events: auto;
+    }
+    .reveal-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 5px;
+      background: var(--rev-bg, #FF6B35);
+    }
+    @keyframes rev-pop {
+      from { transform: scale(0.55) translateY(18px); opacity: 0; }
+      to   { transform: scale(1)    translateY(0);    opacity: 1; }
+    }
+    #rev-close {
+      position: absolute; top: 12px; right: 12px;
+      width: 30px; height: 30px;
+      background: rgba(0,0,0,0.07); border: none;
+      border-radius: 50%; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; color: rgba(0,0,0,0.38);
+      font-family: var(--font);
+      transition: background 0.15s ease, transform 0.15s ease;
+      -webkit-tap-highlight-color: transparent; z-index: 1;
+    }
+    #rev-close:hover { background: rgba(0,0,0,0.12); transform: scale(1.1); }
+    .reveal-logo {
+      width: 110px; height: 110px; border-radius: 50%;
+      background: #f5f5f5; object-fit: contain; flex-shrink: 0;
+      border: 3px solid var(--rev-bg, #FF6B35);
+      box-shadow: 0 0 0 3.5px #ffffff, 0 4px 18px rgba(0,0,0,0.14);
+    }
+    .reveal-logo-fb {
+      width: 110px; height: 110px; border-radius: 50%;
+      background: var(--rev-bg, #FF6B35);
+      display: none; align-items: center; justify-content: center;
+      font-size: 44px; font-weight: 900; color: #fff; flex-shrink: 0;
+      box-shadow: 0 0 0 3.5px #ffffff, 0 4px 18px rgba(0,0,0,0.14);
+    }
+    @keyframes logo-pop-in {
+      from { transform: scale(0.35); opacity: 0; }
+      to   { transform: scale(1);    opacity: 1; }
+    }
+    .reveal-logo.popping, .reveal-logo-fb.popping {
+      animation: logo-pop-in 0.6s cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    .reveal-name { font-size: 28px; font-weight: 900; color: #1a0a00; line-height: 1.25; max-width: 300px; margin-top: 2px; }
+    .reveal-venue { font-size: 13px; font-weight: 700; color: #7a4830; background: #f3ece5; border-radius: 99px; padding: 5px 14px; margin-top: -4px; display: none; }
+    .reveal-venue:not(:empty) { display: inline-block; }
+
+    /* ── Roll Again button ─────────────────────────────────── */
+    #reroll-btn {
+      position: fixed;
+      bottom: max(24px, calc(env(safe-area-inset-bottom, 0px) + 12px));
+      left: 50%; transform: translateX(-50%);
+      z-index: 1001; display: none;
+      padding: 13px 34px; border: none; border-radius: var(--r-full);
+      background: var(--makan-orange); color: #fff;
+      font-size: 16px; font-weight: 900; cursor: pointer;
+      box-shadow: 0 4px 22px rgba(255,107,53,0.44);
+      font-family: var(--font);
+      transition: background 0.15s ease, box-shadow 0.15s ease,
+        transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    #reroll-btn:hover {
+      background: var(--makan-orange-dk);
+      box-shadow: 0 6px 30px rgba(255,107,53,0.54);
+      transform: translateX(-50%) scale(1.07);
+    }
+
+    /* ── Mobile ────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .start-card  { padding: 28px 20px 24px; }
+      .start-title { font-size: 38px; }
+      .start-icon  { font-size: 56px; }
+      .start-sub   { font-size: 14px; max-width: 200px; }
+      .reveal-card { padding: 44px 28px 32px; min-width: 0; max-width: 88vw; }
+      .reveal-logo, .reveal-logo-fb { width: 88px; height: 88px; }
+      .reveal-logo-fb { font-size: 36px; }
+      .reveal-name { font-size: 22px; }
+      .reveal-venue { font-size: 12px; padding: 4px 12px; }
+      .flabel { min-width: 38px; font-size: 9px; }
+      .fpill  { font-size: 11px; padding: 3px 8px; }
+      #game-badge { top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); }
+    }
+
+    /* ── Swipe hint ───────────────────────────────────────── */
+    #swipe-hint {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80px; height: 80px;
+      pointer-events: none; z-index: 8;
+      opacity: 0; transition: opacity 0.9s ease;
+    }
+    #swipe-hint.visible { opacity: 1; }
+    .sh-arrow {
+      position: absolute;
+      font-family: var(--font); font-size: 22px; font-weight: 900;
+      color: var(--makan-orange);
+      text-shadow: 0 0 12px rgba(255,107,53,0.5);
+      animation: sh-pulse 2.0s ease-in-out infinite;
+    }
+    .sh-up { top: -38px; left: 50%; transform: translateX(-50%); }
+    .sh-dn { bottom: -38px; left: 50%; transform: translateX(-50%); }
+    .sh-lt { left: -38px; top: 50%; transform: translateY(-50%); }
+    .sh-rt { right: -38px; top: 50%; transform: translateY(-50%); }
+    @keyframes sh-pulse {
+      0%, 100% { opacity: 0.12; }
+      50% { opacity: 0.75; }
+    }
+
+    /* ── In-game brand badge ─────────────────────────────── */
+    #game-badge {
+      position: fixed; top: 16px; left: 16px;
+      z-index: 50; display: none;
+      padding: 7px 14px;
+      background: rgba(255,255,255,0.72); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,107,53,0.18);
+      border-radius: 99px;
+      font-family: var(--font); font-size: 13px; font-weight: 800;
+      color: rgba(120,55,10,0.80); letter-spacing: -0.01em;
+    }
+
+    /* ── Drag hint ───────────────────────────────────────── */
+    #drag-hint {
+      position: fixed; top: 22px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 100; pointer-events: none;
+      font-size: 11px; font-weight: 800;
+      color: rgba(120,55,10,0.72);
+      letter-spacing: 0.10em; text-transform: uppercase;
+      background: rgba(255,255,255,0.72); backdrop-filter: blur(8px);
+      padding: 7px 18px; border-radius: 99px;
+      border: 1px solid rgba(255,107,53,0.14);
+      opacity: 0; transition: opacity 0.6s ease;
+    }
+    #drag-hint.visible { opacity: 1; }
+
+    /* ── Shuffle FAB ─────────────────────────────────────── */
+    #refresh-btn {
+      position: fixed;
+      bottom: calc(28px + env(safe-area-inset-bottom));
+      left: calc(24px + env(safe-area-inset-left));
+      z-index: 20; display: none;
+      padding: 13px 20px;
+      background: rgba(255,255,255,0.72); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,107,53,0.18);
+      color: rgba(120,55,10,0.80); border-radius: 50px;
+      font-family: var(--font); font-size: 13px; font-weight: 800;
+      cursor: pointer; letter-spacing: 0.02em;
+      transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), background 0.15s ease;
+    }
+    #refresh-btn:hover  { background: rgba(255,255,255,0.88); transform: scale(1.08); }
+    #refresh-btn:active { transform: scale(0.95); }
+    @keyframes refresh-spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    #refresh-btn.spinning .rf-icon { display: inline-block; animation: refresh-spin 0.5s ease both; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Start / loading screen ──────────────────────────── -->
+  <div id="loading-overlay">
+    <span class="fe" style="top:7%;left:5%;font-size:34px;--d:5.4s;--del:0s">🍜</span>
+    <span class="fe" style="top:68%;left:3%;font-size:22px;--d:6.9s;--del:1.1s">🥢</span>
+    <span class="fe" style="top:14%;right:7%;font-size:40px;--d:4.8s;--del:0.6s">🍔</span>
+    <span class="fe" style="top:76%;right:5%;font-size:27px;--d:7.3s;--del:2.0s">🍣</span>
+    <span class="fe" style="top:44%;left:2%;font-size:20px;--d:5.8s;--del:1.5s">🧆</span>
+    <span class="fe" style="top:36%;right:3%;font-size:32px;--d:6.2s;--del:0.3s">🌮</span>
+    <span class="fe" style="bottom:16%;left:11%;font-size:26px;--d:5.1s;--del:2.5s">🍕</span>
+    <span class="fe" style="bottom:10%;right:11%;font-size:36px;--d:7.7s;--del:1.8s">🍱</span>
+
+    <div class="start-card">
+      <div class="start-icon">🎲</div>
+      <h1 class="start-title">MakanDice</h1>
+      <div class="start-rule"></div>
+      <p class="start-sub">Roll the die to discover your next restaurant!</p>
+
+      <!-- Filters -->
+      <div id="filter-wrap">
+        <div class="filter-divider"></div>
+        <div class="filter-row">
+          <span class="flabel">Dietary</span>
+          <div class="fpills">
+            <button class="fpill" data-catid="724">🌙 Halal</button>
+            <button class="fpill" data-catid="732">🐷 Pork Free</button>
+            <button class="fpill" data-catid="735">🥗 Veg</button>
+            <button class="fpill" data-catid="728">👦 Kids</button>
+          </div>
+        </div>
+        <div class="filter-row">
+          <span class="flabel">Cuisine</span>
+          <div class="fpills">
+            <button class="fpill" data-catid="730">🍜 Local</button>
+            <button class="fpill" data-catid="720">🥢 Chinese</button>
+            <button class="fpill" data-catid="727">🍱 Japanese</button>
+            <button class="fpill" data-catid="729">🌶️ Korean</button>
+            <button class="fpill" data-catid="737">🍔 Western</button>
+            <button class="fpill" data-catid="725">🍛 Indian</button>
+            <button class="fpill" data-catid="734">🌿 Thai</button>
+          </div>
+        </div>
+        <div class="filter-row">
+          <span class="flabel">Type</span>
+          <div class="fpills">
+            <button class="fpill" data-catid="721">🍰 Desserts</button>
+            <button class="fpill" data-catid="722">🥤 Drinks</button>
+            <button class="fpill" data-catid="719">☕ Café</button>
+            <button class="fpill" data-catid="718">🥐 Bakery</button>
+            <button class="fpill" data-catid="723">⚡ Fast Food</button>
+            <button class="fpill" data-catid="733">🍿 Snack</button>
+          </div>
+        </div>
+        <p id="filter-count"></p>
+        <div class="filter-divider"></div>
+      </div>
+
+      <div id="loading-state">
+        <div class="makan-spinner"></div>
+        <p id="loading-text">Loading restaurants…</p>
+      </div>
+      <button id="tap-prompt">Let's Roll! 🎲</button>
+    </div>
+  </div>
+
+  <!-- ── Three.js game scene ─────────────────────────────── -->
+  <div id="game-scene">
+    <canvas id="die-canvas"></canvas>
+  </div>
+
+  <!-- ── Roll hint ─────────────────────────────────────────── -->
+  <div id="roll-hint" class="hidden">Swipe or tap to roll</div>
+
+  <!-- Swipe direction hint -->
+  <div id="swipe-hint">
+    <span class="sh-arrow sh-up">↑</span>
+    <span class="sh-arrow sh-dn">↓</span>
+    <span class="sh-arrow sh-lt">←</span>
+    <span class="sh-arrow sh-rt">→</span>
+  </div>
+
+  <!-- In-game brand badge (top-left) -->
+  <div id="game-badge">🎲 MakanDice</div>
+
+  <!-- UI chrome -->
+  <div id="drag-hint">Swipe to roll</div>
+
+  <!-- Shuffle FAB -->
+  <button id="refresh-btn"><span class="rf-icon">🔀</span> Shuffle</button>
+
+  <!-- ── Backdrop ──────────────────────────────────────────── -->
+  <div id="backdrop"></div>
+
+  <!-- ── Reveal ────────────────────────────────────────────── -->
+  <div id="reveal-overlay">
+    <div class="reveal-card" id="reveal-card">
+      <button id="rev-close" aria-label="Close">✕</button>
+      <img  class="reveal-logo"    id="rev-logo" src="" alt="" style="display:none">
+      <div  class="reveal-logo-fb" id="rev-fb"></div>
+      <h2   class="reveal-name"    id="rev-name"></h2>
+      <p    class="reveal-venue"   id="rev-venue"></p>
+    </div>
+  </div>
+
+  <button id="reroll-btn">Roll Again 🎲</button>
+
+  <script src="data.js"></script>
+  <script type="module">
+  import * as THREE from 'three';
+
+  // ── Filter config ─────────────────────────────────────────
+  const FILTER_GROUPS = {
+    dietary: [724, 732, 735, 728],
+    cuisine: [730, 720, 727, 729, 737, 725, 734],
+    type:    [721, 722, 719, 718, 723, 733],
+  };
+
+  const PALETTE = [
+    { c: '#FF6B35', cd: '#c94e1a' },
+    { c: '#EF476F', cd: '#bf2950' },
+    { c: '#FFD23F', cd: '#c49500' },
+    { c: '#06D6A0', cd: '#04977a' },
+    { c: '#9D4EDD', cd: '#6e2faa' },
+    { c: '#118AB2', cd: '#0d6484' },
+  ];
+  let _colorIdx = 0;
+
+  const CAT_LABEL_PRIORITY = [
+    [721,'🍰'],[722,'🥤'],[718,'🥐'],[719,'☕'],
+    [727,'🍱'],[729,'🌶️'],[725,'🍛'],[720,'🥢'],
+    [730,'🍜'],[734,'🌿'],[737,'🍔'],[723,'⚡'],
+    [733,'🍿'],[724,'🌙'],[732,'✅'],[728,'👦'],[735,'🥗'],
+  ];
+
+  let allShops      = [];
+  let activeFilters = new Set();
+
+  function getFilteredShops() {
+    if (activeFilters.size === 0) return allShops;
+    const byGroup = {};
+    for (const id of activeFilters) {
+      for (const [grp, ids] of Object.entries(FILTER_GROUPS)) {
+        if (ids.includes(id)) { (byGroup[grp] = byGroup[grp] || []).push(id); break; }
+      }
+    }
+    return allShops.filter(s =>
+      Object.values(byGroup).every(g => g.some(id => s.categories.includes(id)))
+    );
+  }
+
+  function updateFilterCount() {
+    const n   = getFilteredShops().length;
+    const el  = document.getElementById('filter-count');
+    const btn = document.getElementById('tap-prompt');
+    el.textContent = n === 0
+      ? 'No restaurants match — try fewer filters'
+      : `${n} restaurant${n !== 1 ? 's' : ''} available`;
+    el.classList.toggle('empty', n === 0);
+    btn.disabled      = n === 0;
+    btn.style.opacity = n === 0 ? '0.45' : '';
+  }
+
+  function getDieLabel() {
+    for (const [id, emoji] of CAT_LABEL_PRIORITY) {
+      if (activeFilters.has(id)) return emoji;
+    }
+    return '🎲';
+  }
+
+  function initFilters() {
+    const wrap = document.getElementById('filter-wrap');
+    wrap.style.display = 'flex';
+    updateFilterCount();
+    wrap.querySelectorAll('.fpill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.catid);
+        if (activeFilters.has(id)) { activeFilters.delete(id); btn.classList.remove('active'); }
+        else                        { activeFilters.add(id);    btn.classList.add('active'); }
+        updateFilterCount();
+      });
+    });
+  }
+
+  // ── Audio ─────────────────────────────────────────────────
+  let audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  // Rolling rumble — continuous during tumble (lowpass noise + detuned hum)
+  let rumNode = null, rumGain = null, rumFlt = null;
+  let rumOsc1 = null, rumOsc2 = null, rumOscGain = null;
+
+  function startRumble() {
+    if (!audioCtx || rumNode) return;
+    const sr = audioCtx.sampleRate;
+    const buf = audioCtx.createBuffer(1, sr * 2, sr);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    rumNode = audioCtx.createBufferSource(); rumNode.buffer = buf; rumNode.loop = true;
+    rumFlt = audioCtx.createBiquadFilter(); rumFlt.type = 'lowpass'; rumFlt.frequency.value = 200; rumFlt.Q.value = 0.4;
+    rumGain = audioCtx.createGain(); rumGain.gain.value = 0;
+    rumNode.connect(rumFlt); rumFlt.connect(rumGain); rumGain.connect(audioCtx.destination);
+    rumNode.start();
+    rumOsc1 = audioCtx.createOscillator(); rumOsc1.type = 'sine'; rumOsc1.frequency.value = 55;
+    rumOsc2 = audioCtx.createOscillator(); rumOsc2.type = 'sine'; rumOsc2.frequency.value = 58;
+    rumOscGain = audioCtx.createGain(); rumOscGain.gain.value = 0;
+    rumOsc1.connect(rumOscGain); rumOsc2.connect(rumOscGain); rumOscGain.connect(audioCtx.destination);
+    rumOsc1.start(); rumOsc2.start();
+  }
+
+  function updateRumble(speed) {
+    if (!rumFlt || !rumGain) return;
+    const t = audioCtx.currentTime + 0.05, n = Math.min(speed / 14, 1);
+    rumFlt.frequency.linearRampToValueAtTime(200 + n * 600, t);
+    rumGain.gain.linearRampToValueAtTime(n * 0.06, t);
+    if (rumOsc1 && rumOscGain) {
+      rumOsc1.frequency.linearRampToValueAtTime(55 + n * 80, t);
+      rumOsc2.frequency.linearRampToValueAtTime(58 + n * 82, t);
+      rumOscGain.gain.linearRampToValueAtTime(n * 0.04, t);
+    }
+  }
+
+  function stopRumble() {
+    if (!rumNode) return;
+    const fade = audioCtx.currentTime + 0.12;
+    rumGain.gain.linearRampToValueAtTime(0, fade);
+    if (rumOscGain) rumOscGain.gain.linearRampToValueAtTime(0, fade);
+    setTimeout(() => {
+      try { rumNode.stop(); } catch(e) {}
+      try { if (rumOsc1) rumOsc1.stop(); } catch(e) {}
+      try { if (rumOsc2) rumOsc2.stop(); } catch(e) {}
+      rumNode = rumGain = rumFlt = null;
+      rumOsc1 = rumOsc2 = rumOscGain = null;
+    }, 200);
+  }
+
+  // Periodic clack as die faces rotate past (like a die hitting the table)
+  function playClack(vol) {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime, dur = 0.03, sr = audioCtx.sampleRate;
+    const buf = audioCtx.createBuffer(1, Math.ceil(sr * dur), sr);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2);
+    const src = audioCtx.createBufferSource(); src.buffer = buf;
+    const flt = audioCtx.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = 1400; flt.Q.value = 0.7;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(Math.min(0.18, vol * 0.18), now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    src.connect(flt); flt.connect(g); g.connect(audioCtx.destination);
+    src.start(now); src.stop(now + dur + 0.01);
+  }
+
+  // Initial throw impact
+  function playRollKick() {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator(); osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, now);
+    osc.frequency.exponentialRampToValueAtTime(45, now + 0.08);
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.22, now + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(now); osc.stop(now + 0.18);
+  }
+
+  function playLand() {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator(); osc.type = 'sine';
+    osc.frequency.setValueAtTime(120, now);
+    osc.frequency.exponentialRampToValueAtTime(50, now + 0.14);
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.30, now + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(now); osc.stop(now + 0.28);
+    // Settle rattle
+    const dur2 = 0.025;
+    const buf = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * dur2), audioCtx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.5);
+    const src = audioCtx.createBufferSource(); src.buffer = buf;
+    const flt = audioCtx.createBiquadFilter(); flt.type = 'lowpass'; flt.frequency.value = 600; flt.Q.value = 0.5;
+    const g2 = audioCtx.createGain();
+    g2.gain.setValueAtTime(0.12, now + 0.06);
+    g2.gain.exponentialRampToValueAtTime(0.001, now + 0.06 + dur2);
+    src.connect(flt); flt.connect(g2); g2.connect(audioCtx.destination);
+    src.start(now + 0.06); src.stop(now + 0.06 + dur2 + 0.01);
+  }
+
+  function playChime() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    [523.25, 783.99, 1046.50].forEach((freq, i) => {
+      const osc = audioCtx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
+      const g   = audioCtx.createGain(); const s = i * 0.09;
+      g.gain.setValueAtTime(0, t + s);
+      g.gain.linearRampToValueAtTime(0.11, t + s + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.001, t + s + 0.36);
+      osc.connect(g); g.connect(audioCtx.destination);
+      osc.start(t + s); osc.stop(t + s + 0.40);
+    });
+  }
+
+  // ── Three.js setup ────────────────────────────────────────
+  const dieCanvas = document.getElementById('die-canvas');
+  const scene     = new THREE.Scene();
+  const camera    = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
+  camera.position.set(0, 0.5, 7.8);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ canvas: dieCanvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+  renderer.toneMapping       = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.10;
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // ── Lighting ──────────────────────────────────────────────
+  // Bright neutral sky / warm ground
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xffeedd, 1.1));
+
+  // Clean white key light — upper right front
+  const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
+  keyLight.position.set(4, 6, 4.5);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.setScalar(2048);
+  keyLight.shadow.camera.near = 0.5;
+  keyLight.shadow.camera.far  = 22;
+  keyLight.shadow.camera.left = keyLight.shadow.camera.bottom = -5;
+  keyLight.shadow.camera.right = keyLight.shadow.camera.top   =  5;
+  keyLight.shadow.radius = 12;
+  scene.add(keyLight);
+
+  // Soft lavender-blue rim from back-left
+  const rimLight = new THREE.DirectionalLight(0xc8deff, 0.45);
+  rimLight.position.set(-4, 2, -4);
+  scene.add(rimLight);
+
+  // Warm peach fill from front-bottom (subtle)
+  const fillLight = new THREE.PointLight(0xffcc88, 0.7, 20);
+  fillLight.position.set(0, -2.2, 5);
+  scene.add(fillLight);
+
+  // ── Shadow-receiving floor ────────────────────────────────
+  const floorMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(30, 30),
+    new THREE.ShadowMaterial({ opacity: 0.12 })
+  );
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = -1.8;
+  floorMesh.receiveShadow = true;
+  scene.add(floorMesh);
+
+  // Warm orange halo glow under die
+  const glowMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(5, 5),
+    new THREE.MeshBasicMaterial({
+      color: 0xffaa55, transparent: true, opacity: 0.05,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  glowMesh.rotation.x = -Math.PI / 2;
+  glowMesh.position.set(0, -1.79, 0);
+  scene.add(glowMesh);
+
+  // ── Per-face material factory (restaurant logo + name) ────
+  let currentShops = [];
+
+  function pick6(pool) {
+    if (!pool.length) return [];
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const result = [];
+    for (let i = 0; i < 6; i++) result.push(shuffled[i % shuffled.length]);
+    return result;
+  }
+
+  function makeFaceMaterial(shop, colorIdx) {
+    const sz  = 512;
+    const cx  = sz / 2, cy = sz / 2;   // dead-centre
+    const R   = 185;                     // logo circle radius (~72% of face)
+    const cv  = Object.assign(document.createElement('canvas'), { width: sz, height: sz });
+    const ctx = cv.getContext('2d');
+    const pal = PALETTE[colorIdx % PALETTE.length];
+
+    function drawFace(img) {
+      ctx.clearRect(0, 0, sz, sz);
+      // Clean white face
+      ctx.fillStyle = '#FAFAFA';
+      ctx.fillRect(0, 0, sz, sz);
+      // Subtle colour accent — thin bottom edge
+      ctx.fillStyle = pal.c;
+      ctx.fillRect(0, sz - 8, sz, 8);
+
+      if (img) {
+        // White backing circle
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(cx, cy, R + 6, 0, Math.PI * 2); ctx.fill();
+        // Logo clipped to circle
+        ctx.save();
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+        ctx.drawImage(img, cx - R, cy - R, R * 2, R * 2);
+        ctx.restore();
+        // Thin coloured border ring
+        ctx.strokeStyle = pal.c; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.arc(cx, cy, R + 3, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        // Solid colour circle with initial letter
+        ctx.fillStyle = pal.c;
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 160px Nunito, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText((shop.title || '?')[0].toUpperCase(), cx, cy);
+      }
+      tex.needsUpdate = true;
+    }
+
+    // Immediate fallback — coloured circle + initial
+    ctx.fillStyle = '#FAFAFA'; ctx.fillRect(0, 0, sz, sz);
+    ctx.fillStyle = pal.c; ctx.fillRect(0, sz - 8, sz, 8);
+    ctx.fillStyle = pal.c;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 160px Nunito, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText((shop.title || '?')[0].toUpperCase(), cx, cy);
+
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    if (shop.logo) {
+      const img = new Image();
+      img.onload  = () => drawFace(img);
+      img.onerror = () => drawFace(null);
+      // Route through Vite proxy to avoid CORS block (server has no CORS headers)
+      img.src = shop.logo.replace('https://sunwaymalls.indoorcms.com', '/cdn');
+    }
+
+    return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0.03 });
+  }
+
+  // ── Die mesh ──────────────────────────────────────────────
+  let die = null;
+
+  function buildDie(shops) {
+    currentShops = shops.length >= 6 ? shops.slice(0, 6)
+      : Array.from({ length: 6 }, (_, i) => shops[i % shops.length]);
+    if (die) {
+      if (Array.isArray(die.material)) {
+        die.material.forEach(m => { m.map?.dispose(); m.dispose(); });
+      } else {
+        die.material.map?.dispose();
+        die.material.dispose();
+      }
+      die.geometry.dispose();
+      scene.remove(die);
+    }
+    const mats = currentShops.map((shop, i) => makeFaceMaterial(shop, i));
+    die = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 2.2), mats);
+    die.castShadow = true;
+    scene.add(die);
+  }
+
+  // ── Clean face-up orientations ────────────────────────────
+  // BoxGeometry: ±X, ±Y, ±Z faces. We settle so one face faces camera (+Z).
+  const FACE_QUATS = [
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0),  0),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0),  Math.PI / 2),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0),  Math.PI),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0),  Math.PI / 2),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2),
+  ];
+
+  // Maps FACE_QUATS[i] → BoxGeometry material index facing camera
+  // BoxGeometry order: +X=0, -X=1, +Y=2, -Y=3, +Z=4, -Z=5
+  // Derived by rotating each face's local normal through FACE_QUATS[i] and finding which lands on +Z
+  const FACE_QUAT_TO_MAT = [4, 1, 5, 0, 2, 3];
+
+  // ── Config ────────────────────────────────────────────────
+  const CFG = {
+    FRICTION:      0.975,    // angular velocity decay at low speed
+    FRICTION_FAST: 0.993,    // angular velocity decay at high speed (long satisfying tumble)
+    MIN_ROLL_V:    0.25,     // angular speed (rad/s) threshold before snap
+    SNAP_LERP:     0.12,     // slerp factor per frame during snap
+    DRAG_SENSE:    0.012,    // radians per pixel of drag
+    TAP_IMPULSE:   14,       // default roll speed (rad/s) for a tap
+    MAX_IMPULSE:   24,       // max roll speed from swipe
+    TICK_THRESH:   Math.PI / 3,  // rotation (rad) between clack sounds
+    IDLE_SPEED:    0.50,     // idle rotation (rad/s)
+  };
+  const IDLE_AXIS = new THREE.Vector3(0.20, 1, 0.14).normalize();
+
+  // ── State ────────────────────────────────────────────────
+  const S = {
+    phase:       'idle',  // idle | dragging | rolling | snapping | reveal
+    dieQ:        new THREE.Quaternion(),
+    angVel:      new THREE.Vector3(),   // angular velocity (rad/s)
+    drag:        false,
+    dragPX: 0, dragPY: 0,
+    vHistX: [], vHistY: [],
+    peakV:       0,
+    totalDist:   0,
+    tickAcc:     0,
+    idleTime:    0,
+    dieY:        0,
+    snapQ:       new THREE.Quaternion(),
+    pendingShop: null,
+    pendingCI:   0,
+    revealShown: false,
+    gameStarted: false,
+  };
+
+  // ── Swipe hint ──────────────────────────────────────────
+  const swipeHintEl = document.getElementById('swipe-hint');
+  let _shTimer = null;
+  function showSwipeHint(delay) {
+    clearTimeout(_shTimer);
+    _shTimer = setTimeout(() => swipeHintEl?.classList.add('visible'), delay ?? 900);
+  }
+  function hideSwipeHint() {
+    clearTimeout(_shTimer);
+    swipeHintEl?.classList.remove('visible');
+  }
+
+  // ── Snap: find geometrically nearest clean face ─────────
+  function beginSnap() {
+    let bestIdx = 0, bestAngle = Infinity;
+    for (let i = 0; i < FACE_QUATS.length; i++) {
+      const a = S.dieQ.angleTo(FACE_QUATS[i]);
+      if (a < bestAngle) { bestAngle = a; bestIdx = i; }
+    }
+    S.snapQ.copy(FACE_QUATS[bestIdx]);
+    if (S.dieQ.dot(S.snapQ) < 0) {
+      S.snapQ.x *= -1; S.snapQ.y *= -1; S.snapQ.z *= -1; S.snapQ.w *= -1;
+    }
+    const matIdx = FACE_QUAT_TO_MAT[bestIdx];
+    S.pendingShop = currentShops[matIdx] || currentShops[0];
+    S.pendingCI = matIdx % PALETTE.length;
+    S.phase = 'snapping';
+  }
+
+  function onLanded() {
+    S.dieY = 0;
+    playLand();
+    if (navigator.vibrate) navigator.vibrate(40);
+    S.revealShown = true;
+    dieCanvas.style.cursor = 'grab';
+    setTimeout(() => {
+      playChime();
+      showReveal(S.pendingShop, S.pendingCI);
+      document.getElementById('backdrop').classList.add('visible');
+      document.getElementById('reroll-btn').style.display = 'block';
+      S.phase = 'reveal';
+    }, 280);
+  }
+
+  // ── Pointer events ──────────────────────────────────────
+  function getXY(e) {
+    if (e.touches?.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches?.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function onDown(e) {
+    if ((S.phase !== 'idle' && S.phase !== 'reveal') || !S.gameStarted) return;
+    // If reveal is showing, dismiss it first and treat as new interaction
+    if (S.phase === 'reveal') { dismiss(); return; }
+    initAudio();
+    hideSwipeHint();
+    const { x, y } = getXY(e);
+    S.drag = true;
+    S.dragPX = x; S.dragPY = y;
+    S.vHistX = []; S.vHistY = [];
+    S.totalDist = 0;
+    S.peakV = 0;
+    S.phase = 'dragging';
+  }
+
+  function onMove(e) {
+    if (!S.drag) return;
+    const { x, y } = getXY(e);
+    const dx = x - S.dragPX, dy = y - S.dragPY;
+    S.dragPX = x; S.dragPY = y;
+    S.totalDist += Math.hypot(dx, dy);
+
+    const vx = dx * CFG.DRAG_SENSE;
+    const vy = dy * CFG.DRAG_SENSE;
+    S.vHistX.push(vx); if (S.vHistX.length > 3) S.vHistX.shift();
+    S.vHistY.push(vy); if (S.vHistY.length > 3) S.vHistY.shift();
+    S.peakV = Math.max(S.peakV, Math.hypot(vx, vy));
+
+    // Rock die in swipe direction + lift slightly during drag
+    if (die) {
+      const rockX = vy * 0.25;
+      const rockY = vx * 0.25;
+      const rq = new THREE.Quaternion().setFromEuler(new THREE.Euler(rockX, rockY, 0));
+      S.dieQ.premultiply(rq);
+      S.dieQ.normalize();
+      S.dieY = Math.min(S.totalDist * 0.003, 0.4);
+    }
+  }
+
+  function onUp() {
+    if (!S.drag) return;
+    S.drag = false;
+    if (!S.gameStarted) { S.phase = 'idle'; return; }
+
+    // Weighted average — recent frames count more
+    const wavg = arr => {
+      if (!arr.length) return 0;
+      let sum = 0, wt = 0;
+      for (let i = 0; i < arr.length; i++) { const w = 1 + i; sum += arr[i] * w; wt += w; }
+      return sum / wt;
+    };
+    let vx = wavg(S.vHistX);
+    let vy = wavg(S.vHistY);
+    S.vHistX = []; S.vHistY = [];
+    let speed = Math.hypot(vx, vy);
+
+    // Peak velocity boost (captures quick flicks that decelerate before release)
+    const peakFloor = S.peakV * 0.6;
+    if (peakFloor > speed) {
+      if (speed > 0.0001) { const s = peakFloor / speed; vx *= s; vy *= s; }
+      else { vx = peakFloor; vy = 0; }
+      speed = Math.hypot(vx, vy);
+    }
+
+    // Convert to angular speed (rad/s)
+    const rollSpeed = Math.min(speed * 60, CFG.MAX_IMPULSE);
+
+    if (S.totalDist >= 15 && rollSpeed >= 3) {
+      // Swipe — directional throw, speed proportional to swipe force
+      const axis = new THREE.Vector3(vy, vx, (Math.random() - 0.5) * speed * 0.3).normalize();
+      S.angVel.copy(axis).multiplyScalar(Math.max(rollSpeed, 8));
+      startRoll();
+    } else {
+      // Tap or gentle touch — random throw at default speed
+      launchRoll(CFG.TAP_IMPULSE + Math.random() * 4);
+    }
+  }
+
+  function launchRoll(speed) {
+    const axis = new THREE.Vector3(
+      (Math.random() - 0.5) * 2,
+      (Math.random() - 0.5) * 2,
+      (Math.random() - 0.5) * 0.8
+    ).normalize();
+    S.angVel.copy(axis).multiplyScalar(speed);
+    startRoll();
+  }
+
+  function startRoll() {
+    S.phase = 'rolling';
+    S.tickAcc = 0;
+    S.revealShown = false;
+    document.getElementById('roll-hint').classList.add('hidden');
+    document.getElementById('drag-hint').classList.remove('visible');
+    dieCanvas.style.cursor = 'wait';
+    startRumble();
+    playRollKick();
+  }
+
+  function dismiss() {
+    hideReveal();
+    document.getElementById('backdrop').classList.remove('visible');
+    document.getElementById('reroll-btn').style.display = 'none';
+    S.phase = 'idle';
+    S.idleTime = 0;
+    S.dieY = 0;
+    dieCanvas.style.cursor = 'grab';
+    document.getElementById('roll-hint').classList.remove('hidden');
+    document.getElementById('drag-hint').classList.add('visible');
+    showSwipeHint(1600);
+  }
+
+  // ── Hover detection ─────────────────────────────────────
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2(-9999, -9999);
+  let dieHovered = false;
+
+  dieCanvas.addEventListener('mousemove', e => {
+    mouse.x =  (e.clientX / innerWidth)  * 2 - 1;
+    mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  });
+  dieCanvas.addEventListener('mouseleave', () => {
+    mouse.set(-9999, -9999);
+    dieHovered = false;
+  });
+
+  // ── Animation loop ────────────────────────────────────────
+  const _tmpV3 = new THREE.Vector3();
+  let lastT = 0;
+
+  function animate(now) {
+    requestAnimationFrame(animate);
+    const dt = Math.min((now - lastT) / 1000, 0.05);
+    lastT = now;
+
+    if (S.phase === 'idle' || S.phase === 'dragging') {
+      if (S.phase === 'idle') {
+        S.idleTime += dt;
+        S.dieY = Math.sin(S.idleTime * 1.05) * 0.072;
+        const idleRot = new THREE.Quaternion().setFromAxisAngle(IDLE_AXIS, dt * CFG.IDLE_SPEED);
+        S.dieQ.premultiply(idleRot);
+        S.dieQ.normalize();
+      }
+      // Hover — only in idle (not while dragging)
+      if (S.gameStarted && die && S.phase === 'idle') {
+        raycaster.setFromCamera(mouse, camera);
+        const hits = raycaster.intersectObject(die);
+        const wasH = dieHovered;
+        dieHovered = hits.length > 0;
+        if (dieHovered !== wasH) {
+          dieCanvas.style.cursor = dieHovered ? 'pointer' : 'grab';
+        }
+        const ts = dieHovered ? 1.055 : 1.0;
+        _tmpV3.set(ts, ts, ts);
+        die.scale.lerp(_tmpV3, 0.09);
+      } else if (die && S.phase === 'dragging') {
+        // "Grabbed" scale during drag
+        _tmpV3.set(1.06, 1.06, 1.06);
+        die.scale.lerp(_tmpV3, 0.12);
+      }
+
+    } else if (S.phase === 'rolling') {
+      const speed = S.angVel.length();
+      // Apply rotation
+      if (speed > 0.01) {
+        const axis = S.angVel.clone().normalize();
+        const dq = new THREE.Quaternion().setFromAxisAngle(axis, speed * dt);
+        S.dieQ.premultiply(dq);
+        S.dieQ.normalize();
+      }
+      // Speed-dependent friction: fast rolls coast longer
+      const t = Math.min(speed / CFG.MAX_IMPULSE, 1);
+      const friction = Math.pow(CFG.FRICTION + (CFG.FRICTION_FAST - CFG.FRICTION) * t, 60 * dt);
+      S.angVel.multiplyScalar(friction);
+
+      updateRumble(speed);
+
+      // Periodic clack as die faces rotate past
+      S.tickAcc += speed * dt;
+      if (S.tickAcc >= CFG.TICK_THRESH) {
+        playClack(Math.min(1, speed / CFG.TAP_IMPULSE));
+        S.tickAcc -= CFG.TICK_THRESH;
+      }
+
+      // Y jitter — smooth transition from drag lift, bouncing on table feel
+      const jitterY = -Math.abs(Math.sin(S.tickAcc * 4)) * 0.06 * Math.min(1, speed / 5);
+      S.dieY += (jitterY - S.dieY) * 0.15;
+
+      // Scale back to normal
+      if (die) { _tmpV3.set(1, 1, 1); die.scale.lerp(_tmpV3, 0.1); }
+
+      if (speed < CFG.MIN_ROLL_V) {
+        stopRumble();
+        beginSnap();
+      }
+
+    } else if (S.phase === 'snapping') {
+      S.dieQ.slerp(S.snapQ, CFG.SNAP_LERP);
+      S.dieY += (0 - S.dieY) * 0.12; // settle to ground
+      if (die) { _tmpV3.set(1, 1, 1); die.scale.lerp(_tmpV3, 0.1); }
+      if (S.dieQ.angleTo(S.snapQ) < 0.005) {
+        S.dieQ.copy(S.snapQ);
+        if (!S.revealShown) onLanded();
+      }
+    }
+
+    if (die) {
+      die.setRotationFromQuaternion(S.dieQ);
+      die.position.y = S.dieY;
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  // Start loop
+  requestAnimationFrame(t => { lastT = t; requestAnimationFrame(animate); });
+
+  // ── Input wiring ──────────────────────────────────────────
+  dieCanvas.addEventListener('mousedown', onDown);
+  dieCanvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  dieCanvas.addEventListener('touchstart', e => { e.preventDefault(); onDown(e); }, { passive: false });
+  dieCanvas.addEventListener('touchmove', e => { e.preventDefault(); onMove(e); }, { passive: false });
+  window.addEventListener('touchend', onUp);
+  window.addEventListener('touchcancel', onUp);
+
+  // ── Reveal ────────────────────────────────────────────────
+  function triggerPopIn(el) {
+    el.classList.remove('popping');
+    void el.offsetWidth;
+    el.classList.add('popping');
+    setTimeout(() => el.classList.remove('popping'), 700);
+  }
+
+  function showReveal(shop, ci) {
+    const card = document.getElementById('reveal-card');
+    const logo = document.getElementById('rev-logo');
+    const fb   = document.getElementById('rev-fb');
+    card.style.setProperty('--rev-bg', PALETTE[ci].c);
+    const src = shop.logo || '';
+    if (src) {
+      logo.src = src; logo.style.display = 'block'; fb.style.display = 'none';
+      triggerPopIn(logo);
+      logo.onerror = () => {
+        logo.style.display = 'none';
+        fb.style.display   = 'flex';
+        fb.textContent     = (shop.title || '?')[0].toUpperCase();
+        triggerPopIn(fb);
+      };
+    } else {
+      logo.style.display = 'none';
+      fb.style.display   = 'flex';
+      fb.textContent     = (shop.title || '?')[0].toUpperCase();
+      triggerPopIn(fb);
+    }
+    document.getElementById('rev-name').textContent  = shop.title || 'Unknown';
+    document.getElementById('rev-venue').textContent = shop.venue  || '';
+    document.getElementById('reveal-overlay').classList.add('visible');
+    spawnConfetti(PALETTE[ci].c);
+  }
+
+  function hideReveal() {
+    document.getElementById('reveal-overlay').classList.remove('visible');
+  }
+
+  // ── Confetti ──────────────────────────────────────────────
+  function spawnConfetti(primaryColor) {
+    const cv = document.createElement('canvas');
+    cv.style.cssText = 'position:fixed;inset:0;z-index:1002;pointer-events:none;';
+    cv.width = innerWidth; cv.height = innerHeight;
+    document.body.appendChild(cv);
+    const ctx = cv.getContext('2d');
+    const colors = [primaryColor, '#FF6B35', '#FFD23F', '#06D6A0', '#EF476F', '#9D4EDD', '#fff'];
+    const cx = innerWidth * 0.5, cy = innerHeight * 0.42;
+    const pts = Array.from({ length: 68 }, () => ({
+      x: cx, y: cy,
+      vx: (Math.random() - 0.5) * 22, vy: (Math.random() - 0.92) * 18,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rot: Math.random() * Math.PI * 2, rV: (Math.random() - 0.5) * 0.28,
+      shape: Math.random() < 0.5 ? 'rect' : 'circle',
+      r: 3.5 + Math.random() * 4, w: 7 + Math.random() * 6, h: 3 + Math.random() * 4,
+    }));
+    let life = 0;
+    (function tick() {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      life++;
+      const alpha = life < 65 ? 1 : 1 - (life - 65) / 35;
+      for (const p of pts) {
+        p.vy += 0.42; p.vx *= 0.97; p.vy *= 0.97;
+        p.x += p.vx; p.y += p.vy; p.rot += p.rV;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, alpha);
+        ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        if (p.shape === 'circle') { ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill(); }
+        else ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      if (life < 100) requestAnimationFrame(tick);
+      else cv.remove();
+    })();
+  }
+
+  // ── Listeners ─────────────────────────────────────────────
+  document.getElementById('backdrop').addEventListener('click', dismiss);
+  document.getElementById('rev-close').addEventListener('click', dismiss);
+  document.getElementById('reroll-btn').addEventListener('click', () => {
+    dismiss();
+    buildDie(pick6(getFilteredShops()));
+    setTimeout(() => launchRoll(CFG.TAP_IMPULSE + Math.random() * 4), 90);
+  });
+
+  // ── Shuffle FAB — swap restaurants on the die ──────────
+  const refreshBtn = document.getElementById('refresh-btn');
+  refreshBtn.addEventListener('click', () => {
+    buildDie(pick6(getFilteredShops()));
+    S.tickAcc = 0;
+    S.phase = 'idle';
+    S.idleTime = 0;
+    document.getElementById('drag-hint').classList.add('visible');
+    showSwipeHint(1600);
+    // Spin the icon once as tactile confirmation
+    refreshBtn.classList.add('spinning');
+    setTimeout(() => refreshBtn.classList.remove('spinning'), 520);
+  });
+
+  // Pause physics when tab is hidden (saves CPU/battery on kiosk)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && S.phase === 'rolling') {
+      stopRumble();
+      S.angVel.set(0, 0, 0);
+      S.phase = 'idle';
+    }
+  });
+
+  // ── Init ──────────────────────────────────────────────────
+  async function init() {
+    const overlay   = document.getElementById('loading-overlay');
+    const loadState = document.getElementById('loading-state');
+    const tapBtn    = document.getElementById('tap-prompt');
+
+    try {
+      allShops = await loadFBShops();
+      loadState.style.display = 'none';
+      tapBtn.style.display    = 'block';
+      initFilters();
+
+      tapBtn.addEventListener('click', () => {
+        if (tapBtn.disabled) return;
+        initAudio();
+        buildDie(pick6(getFilteredShops()));
+        overlay.style.opacity       = '0';
+        overlay.style.pointerEvents = 'none';
+        setTimeout(() => {
+          overlay.style.display = 'none';
+          S.gameStarted = true;
+          document.getElementById('roll-hint').classList.remove('hidden');
+          document.getElementById('drag-hint').classList.add('visible');
+          document.getElementById('game-badge').style.display = 'block';
+          refreshBtn.style.display = 'block';
+          showSwipeHint(1400);
+        }, 420);
+      }, { once: true });
+
+    } catch (e) {
+      console.error('MakanDice:', e);
+      loadState.innerHTML = `<p style="color:var(--makan-coral);font-weight:700;font-size:14px">
+        Could not load restaurant data.<br>Please check data.js is available.</p>`;
+    }
+  }
+
+  init();
+  </script>
+</body>
+</html>

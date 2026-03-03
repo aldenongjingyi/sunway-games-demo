@@ -2,600 +2,122 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>MakanBox</title>
   <link rel="stylesheet" href="../makan-theme.css">
+  <script type="importmap">
+    {"imports":{"three":"./three.module.min.js"}}
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; font-family: var(--font); }
 
+    /* ── Warm multi-radial background + dot grid overlay ──────────────── */
     body {
-      background: radial-gradient(ellipse at 50% 0%, #FFE8D0 0%, #FFF8F0 62%);
+      background:
+        radial-gradient(ellipse at 42% 34%, rgba(255,130,55,0.26) 0%, transparent 50%),
+        radial-gradient(ellipse at 75% 72%, rgba(239,71,111,0.11) 0%, transparent 44%),
+        radial-gradient(ellipse at 18% 80%, rgba(255,210,63,0.13) 0%, transparent 38%),
+        linear-gradient(160deg, #fff8f2 0%, #fef2e6 50%, #fde5d0 100%);
     }
-
-    /* ── Atmospheric background ─────────────────────────────
-       Subtle floating food emojis fill the "empty" screen
-       with ambient life at near-zero opacity.              */
-    #atm {
-      position: fixed; inset: 22px; z-index: 0;
-      border-radius: 18px;
-      pointer-events: none; overflow: hidden;
-    }
-    #atm span {
-      position: absolute;
-      left: var(--x); top: var(--y);
-      font-size: var(--s, 32px);
-      opacity: 0.055;
-      animation: atm-drift var(--d, 8s) var(--del, 0s) ease-in-out infinite;
-      user-select: none; line-height: 1;
-    }
-    @keyframes atm-drift {
-      0%, 100% { transform: translateY(0) rotate(-6deg); }
-      50%       { transform: translateY(-16px) rotate(7deg) scale(1.04); }
-    }
-
-    /* Dot pattern overlay — very faint so it doesn't fight the floor */
     body::before {
       content: '';
-      position: fixed; inset: 22px; z-index: 0;
-      border-radius: 18px;
-      background-image: radial-gradient(circle, rgba(255,107,53,0.045) 1.5px, transparent 1.5px);
+      position: fixed; inset: 0;
+      background-image: radial-gradient(circle, rgba(255,107,53,0.10) 1.5px, transparent 1.5px);
       background-size: 28px 28px;
-      pointer-events: none;
+      pointer-events: none; z-index: 0;
     }
 
-    /* ── Stage ──────────────────────────────────────────────
-       Solid warm-white wall colour as the base. The floor
-       element paints over the lower portion.               */
-    #stage {
+    /* ── WebGL canvas ──────────────────────────────────────────────────── */
+    #game-scene { position: fixed; inset: 0; z-index: 1; }
+    #die-canvas {
+      width: 100%; height: 100%; display: block;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+    }
+
+    /* ── Background floating particles (shown in-game) ─────────────────── */
+    #bg-particles {
+      position: fixed; inset: 0; z-index: 0;
+      pointer-events: none; display: none;
+    }
+    .bgp {
+      position: absolute; opacity: 0.10;
+      animation: fe-float var(--d, 7s) var(--del, 0s) ease-in-out infinite;
+      user-select: none; pointer-events: none; line-height: 1;
+    }
+    @keyframes fe-float {
+      0%, 100% { transform: translateY(0) rotate(-5deg); }
+      30%       { transform: translateY(-20px) rotate(8deg) scale(1.06); }
+      65%       { transform: translateY(11px) rotate(-3deg) scale(0.96); }
+    }
+
+    /* ── In-game brand badge ────────────────────────────────────────────── */
+    #game-badge {
+      position: fixed; top: 16px; left: 16px;
+      z-index: 50; display: none;
+      padding: 7px 14px;
+      background: rgba(255,255,255,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border: 1.5px solid rgba(255,107,53,0.22);
+      border-radius: 99px;
+      font-size: 13px; font-weight: 800;
+      color: var(--makan-brown); letter-spacing: -0.01em;
+    }
+
+    /* ── Roll hint pill ─────────────────────────────────────────────────── */
+    #roll-hint {
       position: fixed;
-      inset: 22px;
-      z-index: 1;
-      border-radius: 18px;
-      overflow: hidden;
-      clip-path: inset(0 round 18px);
-      background: #FFF8EF;
+      bottom: max(14%, calc(env(safe-area-inset-bottom, 0px) + 76px));
+      left: 50%; transform: translateX(-50%);
+      z-index: 10;
+      font-size: 11px; font-weight: 800;
+      color: rgba(255,255,255,0.92);
+      letter-spacing: 0.18em; text-transform: uppercase;
+      background: rgba(100,50,15,0.42); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      padding: 7px 18px; border-radius: 99px;
+      border: 1px solid rgba(255,255,255,0.14);
+      pointer-events: none; white-space: nowrap;
+      transition: opacity 0.45s ease;
     }
+    #roll-hint.hidden { opacity: 0; }
 
-    /* Subtle inner-edge vignette — keeps the scene contained */
-    #stage::before {
-      content: '';
-      position: absolute; inset: 0; z-index: 100;
-      pointer-events: none;
-      box-shadow: inset 0 0 90px rgba(100, 50, 10, 0.07);
-    }
-
-    /* ── Floor plane ────────────────────────────────────────
-       A solid (non-transparent) warm sand-to-amber gradient.
-       Starts at 28% from stage top — the horizon sits at
-       ~11% in the scatter algorithm so boxes always land on
-       this floor. Distinct from the cream wall above so the
-       two-zone room reads at a glance.                     */
-    #floor-plane {
-      position: absolute;
-      left: 0; right: 0;
-      top: 28%; bottom: 0;
-      z-index: 0;
-      pointer-events: none;
-      background: linear-gradient(
-        to bottom,
-        #F2D898  0%,   /* light warm sand at horizon */
-        #E3C070 45%,   /* mid honey */
-        #C8A040 100%   /* deep amber near viewer */
-      );
-    }
-    /* Horizon crease — clean visual break between wall and floor */
-    #floor-plane::before {
-      content: '';
-      position: absolute;
-      top: -2px; left: 0; right: 0;
-      height: 3px;
-      background: linear-gradient(to right,
-        transparent,
-        rgba(155, 92, 18, 0.55) 18%,
-        rgba(155, 92, 18, 0.72) 50%,
-        rgba(155, 92, 18, 0.55) 82%,
-        transparent
-      );
-      box-shadow: 0 2px 24px rgba(155, 92, 18, 0.22);
-    }
-
-    /* ── Cartoony frame ─────────────────────────────────────
-       Layers (outside → in):
-         1. warm cream body background in the 22px gap
-         2. outer warm-brown halo  (box-shadow spread)
-         3. thick warm-brown stroke  (border: 9px)
-         4. white highlight line — "cartoon sticker" look
-         5. orange accent fill
-         6. thin brown inner hairline
-       Low-frequency SVG displacement creates big, round,
-       balloon-like wobbles — cartoony, not scratchy.       */
-    #frame {
-      position: fixed;
-      inset: 22px;
-      z-index: 50;
-      border-radius: 18px;
-      border: 6px solid #3d1a06;
-      box-shadow:
-        /* white highlight just inside the stroke */
-        inset 0 0 0 1.5px rgba(255,255,255,0.75),
-        /* orange accent band */
-        inset 0 0 0 3.5px #FF6B35,
-        /* thin dark inner hairline */
-        inset 0 0 0 5px #3d1a06,
-        /* outer warm-brown halo */
-        0 0 0 2px #3d1a06,
-        /* flood the gap to the window edge */
-        0 0 0 22px var(--makan-bg);
-      pointer-events: none;
-      filter: url(#bl-ink);
-    }
-
-    /* ── Box ────────────────────────────────────────────────
-       .box is the hit-target and CSS-var holder.
-       .b-scene (child) owns the 3D transform so that
-       CSS filter on .box.dimmed doesn't flatten preserve-3d. */
-    .box {
-      --lift:     0px;
-      --scl:      1;
-      --tx:       0deg;
-      --ty:       0deg;
-      --rot:      0deg;
-      --bx:       10deg;  /* floor tilt X — per-box random */
-      --by:      -18deg;  /* floor tilt Y — negative → left face toward viewer */
-      --depth:    1;      /* 0.38–1.0, set per-box by JS */
-      --sdw:      8px;
-      --sbl:      10px;
-      --sda:      0.16;
-      --sda2:     0.08;
-      --bd:       30px;   /* box depth — overridden per size class */
-      --fall-dur: 620ms;
-      --fall-del: 0ms;
-
-      position: absolute;
-      cursor: pointer;
-      transform: translate(-50%, -50%);
-    }
-
-    /* ── 3D scene wrapper ───────────────────────────────────
-       All 3D transforms live here. Keeping filter on .box
-       (not here) means .box.dimmed's filter is applied after
-       the 3D is composited — preserve-3d still works.      */
-    .b-scene {
-      transform-style: preserve-3d;
-      transform: perspective(900px) rotate(var(--rot))
-                 translateY(var(--lift)) scale(calc(var(--depth) * var(--scl)))
-                 rotateX(calc(var(--bx) + var(--tx))) rotateY(calc(var(--by) + var(--ty)));
-      transition:
-        transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
-        opacity   0.28s ease;
-      will-change: transform;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    /* Bento-style proportions: wider than tall, like a real lunchbox container */
-    .box.xs  { --bw: 70px;  --bh: 42px;  --lh: 14px; --qs: 20px; --bd: 22px; }
-    .box.sm  { --bw: 90px;  --bh: 54px;  --lh: 18px; --qs: 26px; --bd: 28px; }
-    .box.md  { --bw: 112px; --bh: 68px;  --lh: 22px; --qs: 32px; --bd: 36px; }
-    .box.lg  { --bw: 138px; --bh: 84px;  --lh: 28px; --qs: 40px; --bd: 46px; }
-    .box.xl  { --bw: 166px; --bh: 100px; --lh: 34px; --qs: 48px; --bd: 56px; }
-
-    /* ── Lid group ─────────────────────────────────────────
-       Hinges at bottom-center. transform-style: preserve-3d
-       so child faces rotate together as a 3D slab.        */
-    .b-lid {
-      width: calc(var(--bw) + 8px);
-      height: var(--lh);
-      transform-origin: bottom center;
-      transition: transform 0.50s cubic-bezier(0.34, 1.56, 0.64, 1);
-      position: relative; z-index: 2;
-      transform-style: preserve-3d;
-    }
-
-    /* Lid top face */
-    .b-lt {
-      position: absolute;
-      width: calc(var(--bw) + 8px); height: var(--bd);
-      left: 50%; top: 50%;
-      margin-left: calc((var(--bw) + 8px) / -2);
-      margin-top: calc(var(--bd) / -2);
-      transform: rotateX(90deg) translateZ(calc(var(--lh) / 2));
-      background: color-mix(in srgb, var(--cd) 85%, white);
-    }
-
-    /* Lid right face */
-    .b-lr {
-      position: absolute;
-      width: var(--bd); height: var(--lh);
-      left: 50%; top: 0;
-      margin-left: calc(var(--bd) / -2);
-      transform: rotateY(90deg) translateZ(calc((var(--bw) + 8px) / 2));
-      background: color-mix(in srgb, var(--cd) 48%, black);
-    }
-
-    /* Lid front face — smooth glossy plastic */
-    .b-lf {
-      position: absolute; inset: 0;
-      transform: translateZ(calc(var(--bd) / 2));
-      background: var(--cd);
-      border-radius: 8px 8px 2px 2px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.14);
-      overflow: hidden;
-    }
-    /* Glossy top-left sheen */
-    .b-lf::before {
-      content: '';
-      position: absolute; inset: 0;
-      background: radial-gradient(ellipse 80% 70% at 28% 22%,
-        rgba(255,255,255,0.34) 0%, transparent 60%);
-      pointer-events: none;
-    }
-    /* Bottom depth gradient */
-    .b-lf::after {
-      content: '';
-      position: absolute; inset: 0;
-      background: linear-gradient(to bottom,
-        transparent 45%, rgba(0,0,0,0.10) 100%);
-      pointer-events: none;
-    }
-
-    /* Clasp button — small circular snap latch on lid front */
-    .b-hdl {
-      position: absolute;
-      left: 50%; top: 50%;
-      transform: translate(-50%, -50%);
-      width: 12px; height: 12px;
-      background: rgba(255,255,255,0.90);
-      border-radius: 50%;
-      box-shadow:
-        0 1.5px 4px rgba(0,0,0,0.24),
-        inset 0 1px 0 rgba(255,255,255,0.70),
-        inset 0 -1px 0 rgba(0,0,0,0.08);
-      z-index: 2;
-    }
-
-    /* ── Left faces (visible with negative --by rotation) ─── */
-    .b-bl {
-      position: absolute;
-      width: var(--bd); height: var(--bh);
-      left: 50%; top: 0;
-      margin-left: calc(var(--bd) / -2);
-      transform: rotateY(-90deg) translateZ(calc(var(--bw) / 2));
-      background: linear-gradient(to right,
-        color-mix(in srgb, var(--c) 64%, black),
-        color-mix(in srgb, var(--c) 56%, black));
-    }
-    .b-ll {
-      position: absolute;
-      width: var(--bd); height: var(--lh);
-      left: 50%; top: 0;
-      margin-left: calc(var(--bd) / -2);
-      transform: rotateY(-90deg) translateZ(calc((var(--bw) + 8px) / 2));
-      background: linear-gradient(to right,
-        color-mix(in srgb, var(--cd) 64%, black),
-        color-mix(in srgb, var(--cd) 56%, black));
-    }
-
-    /* ── Body top (inside rim) ─────────────────────────── */
-    .b-bt {
-      position: absolute;
-      width: var(--bw); height: var(--bd);
-      left: 0; top: 50%;
-      margin-top: calc(var(--bd) / -2);
-      transform: rotateX(-90deg) translateZ(calc(var(--bh) / 2));
-      background: color-mix(in srgb, var(--c) 28%, black);
-    }
-
-    /* ── Lid inner face ─────────────────────────────────── */
-    .b-li {
-      position: absolute; inset: 0;
-      transform: rotateY(180deg) translateZ(calc(var(--bd) / 2));
-      background: color-mix(in srgb, var(--cd) 44%, black);
-      border-radius: 8px 8px 2px 2px;
-    }
-
-    /* ── Cast floor shadow ──────────────────────────────────
-       Elliptical blur below each box — strongest depth cue.
-       Fades in after landing so it doesn't show during fall. */
-    .b-shadow {
-      position: absolute;
-      bottom: -5px; left: 50%;
-      transform: translateX(-50%);
-      width: calc(var(--bw) * 0.78);
-      height: 14px;
-      background: rgba(20, 8, 0, 0.34);
-      border-radius: 50%;
-      filter: blur(8px);
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.35s ease 0.08s;
-    }
-    .box:not(.falling) .b-shadow { opacity: 1; }
-    .box.dimmed .b-shadow { opacity: 0; }
-
-    /* ── Decorative band — a clean stripe around the container  */
-    .b-tape {
-      position: absolute;
-      left: 0; right: 0;
-      top: 40%; height: 18%; min-height: 5px;
-      background: rgba(255,255,255,0.16);
-      border-top:    1.5px solid rgba(255,255,255,0.36);
-      border-bottom: 1.5px solid rgba(255,255,255,0.36);
-      z-index: 0;
-      pointer-events: none;
-    }
-
-    /* ── Body group ─────────────────────────────────────── */
-    .b-body {
-      width: var(--bw);
-      height: var(--bh);
-      position: relative;
-      transform-style: preserve-3d;
-    }
-
-    /* Body right face (away from viewer) */
-    .b-br {
-      position: absolute;
-      width: var(--bd); height: var(--bh);
-      left: 50%; top: 0;
-      margin-left: calc(var(--bd) / -2);
-      transform: rotateY(90deg) translateZ(calc(var(--bw) / 2));
-      background: color-mix(in srgb, var(--c) 45%, black);
-    }
-
-    /* Body front face — smooth glossy plastic lunchbox */
-    .b-bf {
-      position: absolute; inset: 0;
-      transform: translateZ(calc(var(--bd) / 2));
-      background: var(--c);
-      border-radius: 0 0 10px 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      box-shadow:
-        0 var(--sdw) var(--sbl) rgba(45,21,6,var(--sda)),
-        0 calc(var(--sdw) * 1.5) calc(var(--sbl) * 2) rgba(45,21,6,var(--sda2)),
-        inset 0 2px 0 rgba(0,0,0,0.12);
-    }
-    /* Glossy top-left highlight sheen */
-    .b-bf::before {
-      content: '';
-      position: absolute; inset: 0;
-      background: radial-gradient(ellipse 78% 58% at 26% 16%,
-        rgba(255,255,255,0.38) 0%, transparent 64%);
-      border-radius: 0 0 10px 10px;
-      pointer-events: none;
-    }
-    /* Bottom depth vignette */
-    .b-bf::after {
-      content: '';
-      position: absolute; inset: 0;
-      background: linear-gradient(to bottom,
-        transparent 52%, rgba(0,0,0,0.11) 100%);
-      border-radius: 0 0 10px 10px;
-      pointer-events: none;
-    }
-
-    /* Label: "?" or category emoji when filtered */
-    .b-q {
-      position: relative; z-index: 1;
-      font-size: var(--qs);
-      font-weight: 900;
-      color: rgba(255,255,255,0.95);
-      text-shadow: 0 2px 10px rgba(0,0,0,0.22);
-      user-select: none;
-    }
-
-    /* ── Hovered shadow ─────────────────────────────────── */
-    .box.hovered .b-bf {
-      box-shadow:
-        0 28px 60px rgba(0,0,0,0.22),
-        0 8px  20px rgba(0,0,0,0.14),
-        inset 0 2px 0 rgba(0,0,0,0.12);
-    }
-
-    /* ── Featured box — focal hierarchy ─────────────────── */
-    @keyframes featured-ring {
-      0%, 100% { box-shadow: 0 8px 28px rgba(0,0,0,0.20), 0 2px 6px rgba(0,0,0,0.10),
-                             inset 0 2px 0 rgba(0,0,0,0.12),
-                             0 0 0 3px rgba(255,205,45,0.55),
-                             0 0 12px 2px rgba(255,205,45,0.22); }
-      50%       { box-shadow: 0 8px 28px rgba(0,0,0,0.20), 0 2px 6px rgba(0,0,0,0.10),
-                             inset 0 2px 0 rgba(0,0,0,0.12),
-                             0 0 0 4px rgba(255,205,45,0.82),
-                             0 0 18px 4px rgba(255,205,45,0.35); }
-    }
-    .box.featured .b-bf {
-      animation: featured-ring 2.4s ease-in-out infinite;
-    }
-
-    /* ── Dimmed ─────────────────────────────────────────── */
-    .box.dimmed {
-      filter: brightness(0.40) saturate(0.25);
-      pointer-events: none;
-      cursor: default;
-    }
-
-    /* ── Open ────────────────────────────────────────────── */
-    .box.open .b-lid { transform: rotateX(-138deg); }
-
-    /* ── Lid rattle on hover ────────────────────────────── */
-    @keyframes lid-rattle {
-      0%,100% { transform: rotateX(0deg) translateX(0px); }
-      20%      { transform: rotateX(-5deg) translateX(-1px); }
-      40%      { transform: rotateX(1deg)  translateX(1.5px); }
-      60%      { transform: rotateX(-4deg) translateX(0px); }
-      80%      { transform: rotateX(0.5deg) translateX(-0.5px); }
-    }
-    .box.hovered:not(.open):not(.ajar) .b-lid {
-      animation: lid-rattle 0.65s ease-in-out infinite;
-    }
-
-    /* ── Ajar: lid resting slightly open ────────────────────
-       ~25% of boxes rest with their lid back 35°, showing
-       the dark interior and adding depth variety to the scene.
-       Rattle animates around the resting angle, not zero.    */
-    .box.ajar .b-lid {
-      transform: rotateX(-35deg);
-    }
-    @keyframes lid-rattle-ajar {
-      0%,100% { transform: rotateX(-35deg) translateX(0px); }
-      20%      { transform: rotateX(-40deg) translateX(-1px); }
-      40%      { transform: rotateX(-33deg) translateX(1.5px); }
-      60%      { transform: rotateX(-39deg) translateX(0px); }
-      80%      { transform: rotateX(-33.5deg) translateX(-0.5px); }
-    }
-    .box.ajar.hovered:not(.open) .b-lid {
-      animation: lid-rattle-ajar 0.65s ease-in-out infinite;
-    }
-
-    /* ── Dust ring ───────────────────────────────────────── */
-    @keyframes dust-ring {
-      0%   { width: 12px; height: 6px; opacity: 0.55; }
-      100% { width: 120px; height: 28px; opacity: 0; }
-    }
-    .dust {
-      position: fixed;
-      transform: translate(-50%, -50%);
-      border: 1.5px solid rgba(255,107,53,0.45);
-      border-radius: 50%;
-      pointer-events: none;
-      animation: dust-ring 0.5s ease-out forwards;
-      z-index: 4;
-    }
-
-    /* ── Fall animation ──────────────────────────────────
-       Applied to .b-scene (not .box) so the 3D context is
-       preserved. .box keeps its static translate(-50%,-50%).
-
-       Per-keyframe animation-timing-function:
-        0→66%  ease-in   (gravity)
-       66→77%  spring    (squash → bounce)
-       77→85%  ease-in   (back down)
-       85→92%  spring    (mini bounce)
-       92→100% ease-out  (settle)                         */
-    @keyframes fall-in-scene {
-      0% {
-        transform: perspective(900px) rotate(var(--rot))
-                   translateY(-130vh) scale(var(--depth));
-        opacity: 0;
-        animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.5);
-      }
-      5%  { opacity: 1; }
-      66% {
-        transform: perspective(900px) rotate(var(--rot))
-                   translateY(0) scale(var(--depth)) scaleY(0.76) scaleX(1.18);
-        animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
-      }
-      77% {
-        transform: perspective(900px) rotate(var(--rot))
-                   translateY(-16px) scale(var(--depth)) scaleY(1.08) scaleX(0.95);
-        animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.5);
-      }
-      85% {
-        transform: perspective(900px) rotate(var(--rot))
-                   translateY(0) scale(var(--depth)) scaleY(0.95) scaleX(1.03);
-        animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
-      }
-      92% {
-        transform: perspective(900px) rotate(var(--rot))
-                   translateY(-5px) scale(var(--depth)) scaleY(1.01);
-        animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      100% {
-        transform: perspective(900px) rotate(var(--rot))
-                   translateY(0) scale(var(--depth))
-                   rotateX(var(--bx)) rotateY(var(--by));
-        opacity: 1;
-      }
-    }
-    .box.falling {
-      pointer-events: none !important;
-      z-index: 30 !important;
-    }
-    .box.falling > .b-scene {
-      animation: fall-in-scene var(--fall-dur, 620ms) var(--fall-del, 0ms) both;
-    }
-
-    /* ── Filters ─────────────────────────────────────────── */
-    #filter-wrap {
-      display: none;
-      flex-direction: column;
-      gap: 9px;
-      width: 100%;
-      margin-top: 4px;
-    }
-    .filter-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 7px;
-    }
+    /* ── Filters ────────────────────────────────────────────────────────── */
+    #filter-wrap { display: none; flex-direction: column; gap: 9px; width: 100%; margin-top: 4px; }
+    .filter-row { display: flex; align-items: flex-start; gap: 7px; }
     .flabel {
-      font-size: 10px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      color: var(--makan-text-muted);
-      min-width: 46px;
-      padding-top: 5px;
-      flex-shrink: 0;
-      text-align: right;
+      font-size: 10px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.07em; color: var(--makan-text-muted);
+      min-width: 46px; padding-top: 5px; flex-shrink: 0; text-align: right;
     }
     .fpills { display: flex; flex-wrap: wrap; gap: 5px; }
     .fpill {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      padding: 4px 10px;
-      border: none;
-      border-radius: 99px;
-      font-family: var(--font);
-      font-size: 12px;
-      font-weight: 700;
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 4px 10px; border: none; border-radius: 99px;
+      font-family: var(--font); font-size: 12px; font-weight: 700;
       cursor: pointer;
-      background: rgba(45, 21, 6, 0.07);
-      color: var(--makan-text-2);
-      transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
+      background: rgba(45,21,6,0.07); color: var(--makan-text-2);
+      transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1),
                   background 0.15s ease, box-shadow 0.15s ease;
       user-select: none; -webkit-user-select: none;
     }
     .fpill:hover  { background: rgba(255,107,53,0.14); transform: scale(1.07); }
     .fpill.active { background: var(--makan-orange); color: #fff;
                     box-shadow: 0 2px 10px rgba(255,107,53,0.38); transform: scale(1.05); }
-    .filter-divider {
-      width: 100%; height: 1px;
-      background: rgba(255,107,53,0.12);
-      margin: 2px 0;
-    }
-    #filter-count {
-      font-size: 12px; font-weight: 700;
-      color: var(--makan-text-muted);
-      text-align: center;
-      transition: color 0.2s ease;
-    }
+    .filter-divider { width: 100%; height: 1px; background: rgba(255,107,53,0.12); margin: 2px 0; }
+    #filter-count { font-size: 12px; font-weight: 700; color: var(--makan-text-muted); text-align: center; transition: color 0.2s ease; }
     #filter-count.empty { color: var(--makan-coral); }
 
-    /* ── Start / Loading screen ─────────────────────────── */
+    /* ── Start / Loading screen ─────────────────────────────────────────── */
     #loading-overlay {
       position: fixed; inset: 0;
       background: linear-gradient(160deg, #fff4e8 0%, #ffe0c4 100%);
       display: flex; align-items: center; justify-content: center;
-      z-index: 9999;
-      transition: opacity 0.4s ease;
-      overflow: hidden;
+      z-index: 9999; transition: opacity 0.4s ease; overflow: hidden;
     }
     .fe {
       position: absolute; opacity: 0.22;
       animation: fe-float var(--d, 6s) var(--del, 0s) ease-in-out infinite;
       user-select: none; pointer-events: none; line-height: 1;
-    }
-    @keyframes fe-float {
-      0%, 100% { transform: translateY(0) rotate(-6deg); }
-      30%       { transform: translateY(-22px) rotate(9deg) scale(1.07); }
-      65%       { transform: translateY(13px) rotate(-4deg) scale(0.95); }
     }
     .start-card {
       position: relative; z-index: 1;
@@ -610,23 +132,10 @@
       font-size: 68px; line-height: 1;
       animation: makan-bounce-in 0.7s cubic-bezier(0.34,1.56,0.64,1) both;
     }
-    .start-title {
-      font-size: 46px; font-weight: 900; color: var(--makan-orange);
-      letter-spacing: -2px; line-height: 1; margin-top: 2px;
-    }
-    .start-rule {
-      width: 44px; height: 4px;
-      background: linear-gradient(90deg, var(--makan-orange), var(--makan-yellow));
-      border-radius: 2px; margin: 2px 0 4px;
-    }
-    .start-sub {
-      font-size: 15px; font-weight: 700; color: var(--makan-text-2);
-      max-width: 230px; line-height: 1.45;
-    }
-    #loading-state {
-      display: flex; flex-direction: column; align-items: center; gap: 10px;
-      margin-top: 4px;
-    }
+    .start-title { font-size: 46px; font-weight: 900; color: var(--makan-orange); letter-spacing: -2px; line-height: 1; margin-top: 2px; }
+    .start-rule { width: 44px; height: 4px; background: linear-gradient(90deg, var(--makan-orange), var(--makan-yellow)); border-radius: 2px; margin: 2px 0 4px; }
+    .start-sub { font-size: 15px; font-weight: 700; color: var(--makan-text-2); max-width: 230px; line-height: 1.45; }
+    #loading-state { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 4px; }
     #loading-text { font-size: 15px; font-weight: 700; color: var(--makan-text-2); }
     #tap-prompt {
       display: none; margin-top: 4px;
@@ -636,74 +145,89 @@
       border: none; border-radius: var(--r-full);
       box-shadow: 0 4px 22px rgba(255,107,53,0.42);
       font-family: var(--font);
-      transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.15s ease,
-                  opacity 0.2s ease;
+      transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.15s ease, opacity 0.2s ease;
       user-select: none; -webkit-user-select: none;
     }
-    #tap-prompt:not(:disabled):hover {
-      transform: scale(1.07); box-shadow: 0 6px 32px rgba(255,107,53,0.52);
-    }
+    #tap-prompt:not(:disabled):hover { transform: scale(1.07); box-shadow: 0 6px 32px rgba(255,107,53,0.52); }
     #tap-prompt:disabled { cursor: not-allowed; }
 
-    /* ── Backdrop ───────────────────────────────────────── */
+    /* ── Backdrop ───────────────────────────────────────────────────────── */
     #backdrop {
       position: fixed; inset: 0;
-      background: rgba(45,21,6,0.58);
-      backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+      background: rgba(30,12,4,0.65);
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
       z-index: 999; opacity: 0; pointer-events: none;
       transition: opacity 0.35s ease;
     }
     #backdrop.visible { opacity: 1; pointer-events: auto; cursor: pointer; }
 
-    /* ── Reveal overlay ─────────────────────────────────── */
+    /* ── Reveal overlay ─────────────────────────────────────────────────── */
     #reveal-overlay {
       position: fixed; inset: 0; z-index: 1000;
       display: flex; align-items: center; justify-content: center;
       pointer-events: none; opacity: 0;
-      transition: opacity 0.2s ease;
+      transition: opacity 0.22s ease;
     }
     #reveal-overlay.visible { opacity: 1; }
     .reveal-card {
-      display: flex; flex-direction: column; align-items: center; gap: 16px;
-      padding: 44px 56px 38px; border-radius: 32px;
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+      padding: 52px 48px 40px; border-radius: 32px;
+      background: #ffffff;
+      box-shadow: 0 12px 64px rgba(0,0,0,0.28), 0 4px 20px rgba(0,0,0,0.14);
+      text-align: center; min-width: 280px; max-width: 380px;
+      animation: rev-pop 0.48s cubic-bezier(0.34,1.56,0.64,1) both;
+      overflow: hidden; position: relative; pointer-events: auto;
+    }
+    .reveal-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 5px;
       background: var(--rev-bg, #FF6B35);
-      box-shadow: 0 10px 52px rgba(0,0,0,0.30), 0 3px 14px rgba(0,0,0,0.16);
-      text-align: center; min-width: 280px; max-width: 400px;
-      animation: rev-pop 0.5s cubic-bezier(0.34,1.56,0.64,1) both;
     }
     @keyframes rev-pop {
-      from { transform: scale(0.55) translateY(16px); opacity: 0; }
+      from { transform: scale(0.55) translateY(18px); opacity: 0; }
       to   { transform: scale(1)    translateY(0);    opacity: 1; }
     }
+    #rev-close {
+      position: absolute; top: 12px; right: 12px;
+      width: 30px; height: 30px;
+      background: rgba(0,0,0,0.07); border: none;
+      border-radius: 50%; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; color: rgba(0,0,0,0.38);
+      font-family: var(--font);
+      transition: background 0.15s ease, transform 0.15s ease;
+      -webkit-tap-highlight-color: transparent; z-index: 1;
+    }
+    #rev-close:hover { background: rgba(0,0,0,0.12); transform: scale(1.1); }
     .reveal-logo {
-      width: 120px; height: 120px; border-radius: 50%;
-      background: rgba(255,255,255,0.92);
-      object-fit: contain; flex-shrink: 0;
+      width: 110px; height: 110px; border-radius: 50%;
+      background: #f5f5f5; object-fit: contain; flex-shrink: 0;
+      border: 3px solid var(--rev-bg, #FF6B35);
+      box-shadow: 0 0 0 3.5px #ffffff, 0 4px 18px rgba(0,0,0,0.14);
     }
     .reveal-logo-fb {
-      width: 120px; height: 120px; border-radius: 50%;
-      background: rgba(255,255,255,0.92);
+      width: 110px; height: 110px; border-radius: 50%;
+      background: var(--rev-bg, #FF6B35);
       display: none; align-items: center; justify-content: center;
-      font-size: 48px; font-weight: 900;
-      color: var(--rev-bg, #FF6B35); flex-shrink: 0;
+      font-size: 44px; font-weight: 900; color: #fff; flex-shrink: 0;
+      box-shadow: 0 0 0 3.5px #ffffff, 0 4px 18px rgba(0,0,0,0.14);
     }
-    .reveal-name {
-      font-size: 24px; font-weight: 900; color: #fff; line-height: 1.28;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.22); max-width: 320px;
+    @keyframes logo-pop-in {
+      from { transform: scale(0.35); opacity: 0; }
+      to   { transform: scale(1);    opacity: 1; }
     }
-    .reveal-venue {
-      font-size: 15px; font-weight: 700;
-      color: rgba(255,255,255,0.78); margin-top: -4px;
+    .reveal-logo.popping, .reveal-logo-fb.popping {
+      animation: logo-pop-in 0.6s cubic-bezier(0.34,1.56,0.64,1) both;
     }
-    .reveal-hint {
-      font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
-      color: rgba(255,255,255,0.52); margin-top: 2px;
-    }
+    .reveal-name { font-size: 28px; font-weight: 900; color: #1a0a00; line-height: 1.25; max-width: 300px; margin-top: 2px; }
+    .reveal-venue { font-size: 13px; font-weight: 700; color: #7a4830; background: #f3ece5; border-radius: 99px; padding: 5px 14px; margin-top: -4px; display: none; }
+    .reveal-venue:not(:empty) { display: inline-block; }
 
-    /* ── Try Again ──────────────────────────────────────── */
-    #repick-btn {
-      position: fixed; bottom: 24px; left: 50%;
-      transform: translateX(-50%);
+    /* ── New Boxes button ───────────────────────────────────────────────── */
+    #reroll-btn {
+      position: fixed;
+      bottom: max(24px, calc(env(safe-area-inset-bottom, 0px) + 12px));
+      left: 50%; transform: translateX(-50%);
       z-index: 1001; display: none;
       padding: 13px 34px; border: none; border-radius: var(--r-full);
       background: var(--makan-orange); color: #fff;
@@ -713,64 +237,144 @@
       transition: background 0.15s ease, box-shadow 0.15s ease,
         transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
     }
-    #repick-btn:hover {
+    #reroll-btn:hover {
       background: var(--makan-orange-dk);
       box-shadow: 0 6px 30px rgba(255,107,53,0.54);
       transform: translateX(-50%) scale(1.07);
     }
 
-    /* ── Mobile ─────────────────────────────────────────── */
+    /* ── Shuffle FAB — bottom-left ──────────────────────────────────────── */
+    #refresh-btn {
+      position: fixed;
+      bottom: calc(28px + env(safe-area-inset-bottom));
+      left: calc(20px + env(safe-area-inset-left));
+      z-index: 20; display: none;
+      padding: 12px 18px;
+      background: rgba(255,255,255,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border: 1.5px solid rgba(255,107,53,0.24);
+      color: var(--makan-brown); border-radius: 50px;
+      font-family: var(--font); font-size: 13px; font-weight: 800;
+      cursor: pointer; letter-spacing: 0.02em;
+      transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), background 0.15s ease;
+    }
+    #refresh-btn:hover  { background: rgba(255,255,255,0.80); transform: scale(1.08); }
+    #refresh-btn:active { transform: scale(0.95); }
+    @keyframes refresh-spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    #refresh-btn.spinning .rf-icon { display: inline-block; animation: refresh-spin 0.5s ease both; }
+
+    /* ── Browse All FAB — bottom-right ──────────────────────────────────── */
+    #browse-btn {
+      position: fixed;
+      bottom: calc(28px + env(safe-area-inset-bottom));
+      right: calc(20px + env(safe-area-inset-right));
+      z-index: 20; display: none;
+      padding: 12px 18px;
+      background: var(--makan-orange);
+      color: #fff; border: none; border-radius: 50px;
+      font-family: var(--font); font-size: 13px; font-weight: 800;
+      cursor: pointer; letter-spacing: 0.02em;
+      box-shadow: 0 4px 18px rgba(255,107,53,0.40);
+      transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.15s ease;
+    }
+    #browse-btn:hover  { transform: scale(1.08); box-shadow: 0 6px 26px rgba(255,107,53,0.55); }
+    #browse-btn:active { transform: scale(0.95); }
+
+    /* ── Browse sheet ────────────────────────────────────────────────────── */
+    #browse-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.38); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      z-index: 30; opacity: 0; pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    #browse-backdrop.visible { opacity: 1; pointer-events: auto; }
+    #browse-sheet {
+      position: fixed; left: 0; right: 0; bottom: 0;
+      z-index: 31; min-height: 240px; max-height: min(72vh, 640px);
+      background: #fff; border-radius: 24px 24px 0 0;
+      display: flex; flex-direction: column;
+      padding-bottom: env(safe-area-inset-bottom);
+      transform: translateY(100%);
+      transition: transform 0.42s cubic-bezier(0.34,1.56,0.64,1);
+      box-shadow: 0 -8px 40px rgba(0,0,0,0.20);
+    }
+    #browse-sheet.visible { transform: translateY(0); }
+    #browse-sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: #d1d5db; margin: 12px auto 8px; flex-shrink: 0; }
+    #browse-sheet-title {
+      font-size: 17px; font-weight: 800; color: #1a0a00;
+      padding: 0 20px 12px; text-align: center;
+      border-bottom: 1px solid #f5ede6; flex-shrink: 0;
+    }
+    #browse-sheet-title span { font-size: 13px; font-weight: 700; color: #8a6050; }
+    #browse-list { overflow-y: auto; flex: 1; padding: 6px 0; -webkit-overflow-scrolling: touch; }
+    .browse-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 11px 20px; cursor: pointer;
+      transition: background 0.12s ease;
+      border-bottom: 1px solid #fdf6f1;
+    }
+    .browse-item:hover  { background: #fff5ef; }
+    .browse-item:active { background: #ffe8d8; }
+    .browse-item:last-child { border-bottom: none; }
+    .browse-item-logo { width: 44px; height: 44px; border-radius: 50%; object-fit: contain; flex-shrink: 0; background: #f5ede6; }
+    .browse-item-logo-fb {
+      width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 900; color: #fff;
+    }
+    .browse-item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .browse-item-name { font-size: 15px; font-weight: 700; color: #1a0a00; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .browse-item-venue { font-size: 12px; color: #8a6050; font-weight: 600; }
+    @keyframes browse-item-enter {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .browse-item--enter {
+      animation: browse-item-enter 0.26s cubic-bezier(0.34,1.56,0.64,1) both;
+      animation-delay: calc(var(--i, 0) * 22ms);
+    }
+
+    /* ── Peek layer (HTML restaurant logo glimpse during lid opening) ───── */
+    #peek-layer { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+    .box-peek {
+      position: absolute;
+      width: 76px; height: 76px;
+      border-radius: 50%;
+      overflow: hidden;
+      transform: translate(-50%, -50%) scale(0);
+      transition: transform 0.30s cubic-bezier(0.34, 1.56, 0.64, 1);
+      box-shadow: 0 0 0 3.5px rgba(255,255,255,0.94), 0 6px 24px rgba(0,0,0,0.28);
+      background: #fff;
+    }
+    .box-peek.visible { transform: translate(-50%, -50%) scale(1); }
+    .box-peek img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .peek-fb {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 30px; font-weight: 900; color: #fff;
+    }
+
+    /* ── Mobile ─────────────────────────────────────────────────────────── */
     @media (max-width: 600px) {
       .start-card  { padding: 28px 20px 24px; }
       .start-title { font-size: 38px; }
       .start-icon  { font-size: 56px; }
       .start-sub   { font-size: 14px; max-width: 200px; }
-      .reveal-card { padding: 32px 28px 28px; min-width: 0; max-width: 88vw; }
+      .reveal-card { padding: 44px 28px 32px; min-width: 0; max-width: 88vw; }
       .reveal-logo, .reveal-logo-fb { width: 88px; height: 88px; }
       .reveal-logo-fb { font-size: 36px; }
-      .reveal-name { font-size: 20px; }
-      .reveal-venue { font-size: 13px; }
-      .flabel      { min-width: 38px; font-size: 9px; }
-      .fpill       { font-size: 11px; padding: 3px 8px; }
+      .reveal-name  { font-size: 22px; }
+      .reveal-venue { font-size: 12px; padding: 4px 12px; }
+      .flabel { min-width: 38px; font-size: 9px; }
+      .fpill  { font-size: 11px; padding: 3px 8px; }
     }
   </style>
 </head>
 <body>
 
-  <!-- ── SVG filter: rough ink texture for frame ────────────── -->
-  <svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true">
-    <defs>
-      <filter id="bl-ink" x="-5%" y="-5%" width="110%" height="110%"
-              color-interpolation-filters="linearRGB">
-        <feTurbulence type="fractalNoise" baseFrequency="0.018 0.014"
-                      numOctaves="2" seed="5" result="noise"/>
-        <feDisplacementMap in="SourceGraphic" in2="noise"
-                           scale="5"
-                           xChannelSelector="R" yChannelSelector="G"/>
-      </filter>
-    </defs>
-  </svg>
-
-  <!-- ── Frame border (above stage, below overlays) ────────── -->
-  <div id="frame" aria-hidden="true"></div>
-
-  <!-- ── Atmospheric background ─────────────────────────── -->
-  <div id="atm" aria-hidden="true">
-    <span style="--x:5%;  --y:8%;  --s:48px; --d:7.2s; --del:0s  ">🍜</span>
-    <span style="--x:82%; --y:6%;  --s:34px; --d:9.1s; --del:1.4s">🍔</span>
-    <span style="--x:46%; --y:4%;  --s:52px; --d:6.8s; --del:0.7s">🍱</span>
-    <span style="--x:91%; --y:38%; --s:28px; --d:8.4s; --del:2.1s">🍣</span>
-    <span style="--x:2%;  --y:52%; --s:36px; --d:7.6s; --del:1.8s">🌮</span>
-    <span style="--x:72%; --y:78%; --s:30px; --d:9.8s; --del:0.4s">🥢</span>
-    <span style="--x:18%; --y:82%; --s:44px; --d:6.4s; --del:3.0s">🍕</span>
-    <span style="--x:55%; --y:88%; --s:26px; --d:8.9s; --del:1.1s">🧆</span>
-    <span style="--x:33%; --y:20%; --s:38px; --d:7.0s; --del:2.5s">🥐</span>
-    <span style="--x:88%; --y:62%; --s:32px; --d:10s;  --del:0.9s">🍛</span>
-    <span style="--x:24%; --y:45%; --s:22px; --d:8.2s; --del:1.6s">🥤</span>
-    <span style="--x:64%; --y:30%; --s:40px; --d:7.5s; --del:3.4s">☕</span>
-  </div>
-
-  <!-- ── Start / loading screen ──────────────────────────── -->
+  <!-- ── Start / loading screen ────────────────────────────────────────── -->
   <div id="loading-overlay">
     <span class="fe" style="top:7%;left:5%;font-size:34px;--d:5.4s;--del:0s">🍜</span>
     <span class="fe" style="top:68%;left:3%;font-size:22px;--d:6.9s;--del:1.1s">🥢</span>
@@ -782,12 +386,11 @@
     <span class="fe" style="bottom:10%;right:11%;font-size:36px;--d:7.7s;--del:1.8s">🍱</span>
 
     <div class="start-card">
-      <div class="start-icon">🍱</div>
+      <div class="start-icon">🎁</div>
       <h1 class="start-title">MakanBox</h1>
       <div class="start-rule"></div>
-      <p class="start-sub">Pick a mystery box to discover your next restaurant!</p>
+      <p class="start-sub">Pick a mystery gift box to reveal your next restaurant!</p>
 
-      <!-- ── Filters (shown after data loads) ────────────── -->
       <div id="filter-wrap">
         <div class="filter-divider"></div>
         <div class="filter-row">
@@ -822,108 +425,112 @@
             <button class="fpill" data-catid="733">🍿 Snack</button>
           </div>
         </div>
+        <div class="filter-row">
+          <span class="flabel">Boxes</span>
+          <div class="fpills" id="box-count-pills">
+            <button class="fpill count-pill" data-count="3">3</button>
+            <button class="fpill count-pill active" data-count="6">6</button>
+            <button class="fpill count-pill" data-count="9">9</button>
+          </div>
+        </div>
         <p id="filter-count"></p>
         <div class="filter-divider"></div>
       </div>
 
       <div id="loading-state">
         <div class="makan-spinner"></div>
-        <p id="loading-text">Filling the boxes…</p>
+        <p id="loading-text">Loading restaurants…</p>
       </div>
-      <button id="tap-prompt">Pick a Box! 🎉</button>
+      <button id="tap-prompt">Pick a Box! 🎁</button>
     </div>
   </div>
 
-  <!-- ── Stage (boxes injected by JS) ────────────────────── -->
-  <div id="stage">
-    <div id="floor-plane"></div>
+  <!-- ── Three.js game scene ───────────────────────────────────────────── -->
+  <div id="game-scene">
+    <canvas id="die-canvas"></canvas>
   </div>
 
-  <!-- ── Backdrop ─────────────────────────────────────────── -->
+  <!-- ── Background particles (in-game only) ──────────────────────────── -->
+  <div id="bg-particles">
+    <span class="bgp" style="top:5%;left:6%;font-size:30px;--d:8.2s;--del:0s">🎁</span>
+    <span class="bgp" style="top:82%;left:4%;font-size:20px;--d:6.8s;--del:1.3s">🎀</span>
+    <span class="bgp" style="top:11%;right:5%;font-size:34px;--d:7.4s;--del:0.7s">🎊</span>
+    <span class="bgp" style="top:79%;right:6%;font-size:24px;--d:9.1s;--del:2.1s">✨</span>
+    <span class="bgp" style="top:46%;left:2%;font-size:18px;--d:6.3s;--del:1.8s">🌟</span>
+    <span class="bgp" style="top:58%;right:3%;font-size:22px;--d:7.8s;--del:0.4s">🎉</span>
+  </div>
+
+  <!-- ── In-game brand badge ───────────────────────────────────────────── -->
+  <div id="game-badge">🎁 MakanBox</div>
+
+  <!-- ── Tap hint ──────────────────────────────────────────────────────── -->
+  <div id="roll-hint" class="hidden">🎁 Tap any box to open!</div>
+
+  <!-- ── Backdrop ─────────────────────────────────────────────────────── -->
   <div id="backdrop"></div>
 
-  <!-- ── Reveal card ──────────────────────────────────────── -->
+  <!-- ── Reveal ───────────────────────────────────────────────────────── -->
   <div id="reveal-overlay">
     <div class="reveal-card" id="reveal-card">
+      <button id="rev-close" aria-label="Close">✕</button>
       <img  class="reveal-logo"    id="rev-logo" src="" alt="" style="display:none">
       <div  class="reveal-logo-fb" id="rev-fb"></div>
       <h2   class="reveal-name"    id="rev-name"></h2>
       <p    class="reveal-venue"   id="rev-venue"></p>
-      <span class="reveal-hint">Tap anywhere to close</span>
     </div>
   </div>
 
-  <button id="repick-btn">Try Again! 🎁</button>
+  <!-- ── Buttons ──────────────────────────────────────────────────────── -->
+  <button id="reroll-btn">New Boxes 🎁</button>
+  <button id="refresh-btn"><span class="rf-icon">🔀</span> Shuffle</button>
+  <button id="browse-btn">📋 Browse All</button>
+
+  <!-- ── Browse sheet ─────────────────────────────────────────────────── -->
+  <div id="browse-backdrop"></div>
+  <div id="browse-sheet">
+    <div id="browse-sheet-handle"></div>
+    <div id="browse-sheet-title">Choose a Restaurant <span id="browse-count"></span></div>
+    <div id="browse-list"></div>
+  </div>
+
+  <!-- ── Peek layer (logo glimpse shown during lid open) ──────────────── -->
+  <div id="peek-layer"></div>
 
   <script src="data.js"></script>
-  <script>
-  'use strict';
+  <script type="module">
+  import * as THREE from 'three';
 
-  // ── Filter groups ─────────────────────────────────────────
+  // ── Filter config ─────────────────────────────────────────────────────
   const FILTER_GROUPS = {
     dietary: [724, 732, 735, 728],
     cuisine: [730, 720, 727, 729, 737, 725, 734],
     type:    [721, 722, 719, 718, 723, 733],
   };
 
-  // ── Palette ──────────────────────────────────────────────
   const PALETTE = [
-    { c: '#FF6B35', cd: '#c94e1a' },  // brand orange
-    { c: '#EF476F', cd: '#bf2950' },  // coral pink
-    { c: '#FFD23F', cd: '#c49500' },  // golden yellow
-    { c: '#06D6A0', cd: '#04977a' },  // mint green
-    { c: '#9D4EDD', cd: '#6e2faa' },  // purple
-    { c: '#118AB2', cd: '#0d6484' },  // ocean blue
+    { c: '#FF6B35', cd: '#c94e1a' },
+    { c: '#EF476F', cd: '#bf2950' },
+    { c: '#FFD23F', cd: '#c49500' },
+    { c: '#06D6A0', cd: '#04977a' },
+    { c: '#9D4EDD', cd: '#6e2faa' },
+    { c: '#118AB2', cd: '#0d6484' },
   ];
 
-  let _colorIdx = 0;
-  function colorForShop() { return _colorIdx++ % PALETTE.length; }
-
-  // ── Category → display label ─────────────────────────────
-  const CAT_LABEL_PRIORITY = [
-    [721,'🍰'],[722,'🥤'],[718,'🥐'],[719,'☕'],
-    [727,'🍱'],[729,'🌶️'],[725,'🍛'],[720,'🥢'],
-    [730,'🍜'],[734,'🌿'],[737,'🍔'],[723,'⚡'],
-    [733,'🍿'],[724,'🌙'],[732,'✅'],[728,'👦'],[735,'🥗'],
-  ];
-  function labelForShop(shop) {
-    if (activeFilters.size === 0) return '?';
-    for (const [id, emoji] of CAT_LABEL_PRIORITY) {
-      if (shop.categories.includes(id)) return emoji;
-    }
-    return '?';
-  }
-
-  function sizeForDepth(zFloor) {
-    const t = Math.max(0, Math.min(1, zFloor + (Math.random() - 0.5) * 0.30));
-    if (t < 0.18) return 'xs';
-    if (t < 0.38) return 'sm';
-    if (t < 0.62) return 'md';
-    if (t < 0.82) return 'lg';
-    return 'xl';
-  }
-
-  // ── State ────────────────────────────────────────────────
-  let allShops     = [];
-  let openedBox    = null;
+  let allShops      = [];
   let activeFilters = new Set();
+  let boxCount      = 6;
+  let gameStarted   = false;
 
   function getFilteredShops() {
     if (activeFilters.size === 0) return allShops;
-    const activeByGroup = {};
+    const byGroup = {};
     for (const id of activeFilters) {
-      for (const [group, ids] of Object.entries(FILTER_GROUPS)) {
-        if (ids.includes(id)) {
-          if (!activeByGroup[group]) activeByGroup[group] = [];
-          activeByGroup[group].push(id);
-          break;
-        }
+      for (const [grp, ids] of Object.entries(FILTER_GROUPS)) {
+        if (ids.includes(id)) { (byGroup[grp] = byGroup[grp] || []).push(id); break; }
       }
     }
-    return allShops.filter(shop =>
-      Object.values(activeByGroup).every(groupIds =>
-        groupIds.some(id => shop.categories.includes(id))
-      )
+    return allShops.filter(s =>
+      Object.values(byGroup).every(g => g.some(id => s.categories.includes(id)))
     );
   }
 
@@ -935,7 +542,7 @@
       ? 'No restaurants match — try fewer filters'
       : `${n} restaurant${n !== 1 ? 's' : ''} available`;
     el.classList.toggle('empty', n === 0);
-    btn.disabled     = n === 0;
+    btn.disabled      = n === 0;
     btn.style.opacity = n === 0 ? '0.45' : '';
   }
 
@@ -943,78 +550,70 @@
     const wrap = document.getElementById('filter-wrap');
     wrap.style.display = 'flex';
     updateFilterCount();
-    wrap.querySelectorAll('.fpill').forEach(btn => {
+    wrap.querySelectorAll('.fpill[data-catid]').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = Number(btn.dataset.catid);
-        if (activeFilters.has(id)) {
-          activeFilters.delete(id); btn.classList.remove('active');
-        } else {
-          activeFilters.add(id);   btn.classList.add('active');
-        }
+        if (activeFilters.has(id)) { activeFilters.delete(id); btn.classList.remove('active'); }
+        else                        { activeFilters.add(id);    btn.classList.add('active'); }
         updateFilterCount();
+      });
+    });
+    wrap.querySelectorAll('.count-pill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        boxCount = Number(btn.dataset.count);
+        wrap.querySelectorAll('.count-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
       });
     });
   }
 
-  // ── Audio ────────────────────────────────────────────────
+  // ── Audio ─────────────────────────────────────────────────────────────
   let audioCtx = null;
   function initAudio() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-  function playThud(intensity) {
+
+  function playPickSound() {
     if (!audioCtx) return;
     const t = audioCtx.currentTime;
-    const dur = 0.06 + intensity * 0.09;
-    const buf = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * dur), audioCtx.sampleRate);
-    const d   = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++)
-      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.5);
-    const src = audioCtx.createBufferSource(); src.buffer = buf;
-    const lp  = audioCtx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = 190 + intensity * 90; lp.Q.value = 1.4;
+    const osc = audioCtx.createOscillator(); osc.type = 'sine';
+    osc.frequency.setValueAtTime(280, t);
+    osc.frequency.exponentialRampToValueAtTime(520, t + 0.14);
     const g = audioCtx.createGain();
-    g.gain.setValueAtTime(0.22 + intensity * 0.32, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur + 0.04);
-    src.connect(lp); lp.connect(g); g.connect(audioCtx.destination);
-    src.start(t); src.stop(t + dur + 0.05);
-
-    const osc = audioCtx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = 80 + intensity * 55;
-    const gr = audioCtx.createGain();
-    gr.gain.setValueAtTime(0, t);
-    gr.gain.linearRampToValueAtTime(0.055 + intensity * 0.065, t + 0.004);
-    gr.gain.exponentialRampToValueAtTime(0.001, t + 0.09 + intensity * 0.12);
-    osc.connect(gr); gr.connect(audioCtx.destination);
-    osc.start(t); osc.stop(t + 0.12 + intensity * 0.14);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + 0.26);
   }
-  function playBassThud(intensity) {
+
+  // Sparkle tones — plays when the logo peek first appears inside the box
+  function playSparkle() {
     if (!audioCtx) return;
     const t = audioCtx.currentTime;
-    const dur = 0.10 + intensity * 0.14;
-    const buf = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * dur), audioCtx.sampleRate);
-    const d   = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++)
-      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.8);
-    const src = audioCtx.createBufferSource(); src.buffer = buf;
-    const lp  = audioCtx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = 110 + intensity * 50; lp.Q.value = 1.8;
-    const g = audioCtx.createGain();
-    g.gain.setValueAtTime(0.55 + intensity * 0.45, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur + 0.06);
-    src.connect(lp); lp.connect(g); g.connect(audioCtx.destination);
-    src.start(t); src.stop(t + dur + 0.08);
+    [1046.5, 1318.5, 1568].forEach((f, i) => {
+      const osc = audioCtx.createOscillator(); osc.type = 'sine'; osc.frequency.value = f;
+      const g = audioCtx.createGain(); const s = i * 0.06;
+      g.gain.setValueAtTime(0, t + s);
+      g.gain.linearRampToValueAtTime(0.07, t + s + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.001, t + s + 0.22);
+      osc.connect(g); g.connect(audioCtx.destination);
+      osc.start(t + s); osc.stop(t + s + 0.26);
+    });
+  }
 
-    const osc = audioCtx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(55 + intensity * 35, t);
-    osc.frequency.exponentialRampToValueAtTime(28 + intensity * 10, t + 0.18);
-    const gr = audioCtx.createGain();
-    gr.gain.setValueAtTime(0, t);
-    gr.gain.linearRampToValueAtTime(0.18 + intensity * 0.22, t + 0.006);
-    gr.gain.exponentialRampToValueAtTime(0.001, t + 0.20 + intensity * 0.18);
-    osc.connect(gr); gr.connect(audioCtx.destination);
-    osc.start(t); osc.stop(t + 0.28 + intensity * 0.20);
+  function playLand() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator(); osc.type = 'sine';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(55, t + 0.12);
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.28, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + 0.25);
   }
 
   function playChime() {
@@ -1022,191 +621,575 @@
     const t = audioCtx.currentTime;
     [523.25, 783.99, 1046.50].forEach((freq, i) => {
       const osc = audioCtx.createOscillator(); osc.type = 'sine'; osc.frequency.value = freq;
-      const g   = audioCtx.createGain(); const s = i * 0.09;
+      const g = audioCtx.createGain(); const s = i * 0.09;
       g.gain.setValueAtTime(0, t + s);
-      g.gain.linearRampToValueAtTime(0.12, t + s + 0.015);
+      g.gain.linearRampToValueAtTime(0.11, t + s + 0.015);
       g.gain.exponentialRampToValueAtTime(0.001, t + s + 0.36);
       osc.connect(g); g.connect(audioCtx.destination);
       osc.start(t + s); osc.stop(t + s + 0.40);
     });
   }
 
-  // ── Scatter layout ───────────────────────────────────────
-  function computeScatter(count) {
-    const W = innerWidth, H = innerHeight;
-    const mobile = W <= 600;
-    const cols = mobile ? 4 : Math.max(5, Math.round(Math.sqrt(count * W / H * 0.9)));
-    const rows = Math.ceil(count / cols);
-    const horizon  = 0.11;
-    const floorBot = 0.91;
-    const cells = [];
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++)
-        cells.push({ c, r });
-    for (let i = cells.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [cells[i], cells[j]] = [cells[j], cells[i]];
+  // ── Three.js setup ────────────────────────────────────────────────────
+  const dieCanvas = document.getElementById('die-canvas');
+  const scene     = new THREE.Scene();
+
+  // Camera from above-front: looking down at ~22° so you can see into open box tops
+  const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+  camera.position.set(0, 3.6, 8.2);
+  camera.lookAt(0, 0.2, 0);
+
+  const renderer = new THREE.WebGLRenderer({ canvas: dieCanvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+  renderer.toneMapping       = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+
+  let lastOrient = innerWidth >= innerHeight;
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+    // Rebuild grid if orientation flips (portrait ↔ landscape)
+    if (gameStarted && phase === 'idle') {
+      const orient = innerWidth >= innerHeight;
+      if (orient !== lastOrient) {
+        lastOrient = orient;
+        buildBoxes(pickN(getFilteredShops(), boxCount));
+      }
     }
-    return cells.slice(0, count).map(({ c, r }) => {
-      const zFloor = (r + 0.15 + Math.random() * 0.70) / rows;
-      const yPct = horizon + (floorBot - horizon) * Math.pow(zFloor, 2);
-      const halfSpread = 0.12 + zFloor * 0.40;
-      const xFloor = (c + 0.1 + Math.random() * 0.80) / cols;
-      const xPct = 0.5 + (xFloor - 0.5) * halfSpread * 2;
-      const depth = 0.38 + zFloor * 0.62;
-      return {
-        xPct, yPct, depth, zFloor,
-        rot: (Math.random() - 0.5) * 20,
-      };
-    });
+  });
+
+  // ── Lighting ──────────────────────────────────────────────────────────
+  scene.add(new THREE.HemisphereLight(0xffeedd, 0xffd0a0, 0.9));
+
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+  keyLight.position.set(5, 9, 5);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.setScalar(2048);
+  keyLight.shadow.camera.near = 0.5;
+  keyLight.shadow.camera.far  = 26;
+  keyLight.shadow.camera.left = keyLight.shadow.camera.bottom = -9;
+  keyLight.shadow.camera.right = keyLight.shadow.camera.top   =  9;
+  keyLight.shadow.radius = 14;
+  scene.add(keyLight);
+
+  const rimLight = new THREE.DirectionalLight(0xddeeff, 0.38);
+  rimLight.position.set(-5, 2, -5);
+  scene.add(rimLight);
+
+  const fillLight = new THREE.PointLight(0xffcc88, 0.55, 22);
+  fillLight.position.set(0, -1.5, 6);
+  scene.add(fillLight);
+
+  // Warm uplight for dramatic reveal moment
+  const glowLight = new THREE.PointLight(0xff9944, 0.30, 14);
+  glowLight.position.set(0, -3.5, 0);
+  scene.add(glowLight);
+
+  // ── Shadow floor — well below all boxes ──────────────────────────────
+  // Boxes sit at y = ±1.1 (centre). Box bottom = y − BODY_H/2 = −1.1 − 0.46 = −1.56.
+  // Floor at −2.2 is safely below, so no box appears to sink into it.
+  const floorMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(40, 40),
+    new THREE.ShadowMaterial({ opacity: 0.07 })
+  );
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = -2.2;
+  floorMesh.receiveShadow = true;
+  scene.add(floorMesh);
+
+  // ── Box constants ─────────────────────────────────────────────────────
+  const BODY_W = 1.25, BODY_H = 0.92, BODY_D = 1.25, LID_H = 0.28;
+  const LID_REST_Y = BODY_H / 2 + LID_H / 2;   // 0.60
+  const BOB_OFFSETS = [0, 1.05, 2.10, 0.55, 1.60, 2.85, 0.35, 1.75, 0.90];
+  const OPEN_DUR = 0.70;
+
+  // ── Ease helper ───────────────────────────────────────────────────────
+  function easeOutBack(t) {
+    if (t <= 0) return 0; if (t >= 1) return 1;
+    const c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
   }
 
-  // ── Box collision separation ──────────────────────────────
-  function separatePositions(items, W, H) {
-    const FW = { xs: 130, sm: 165, md: 210, lg: 260, xl: 315 };
-    const FH = { xs: 105, sm: 135, md: 170, lg: 210, xl: 255 };
+  // ── Peek overlay helpers ──────────────────────────────────────────────
+  // An HTML div (.box-peek) is positioned at the opened box's screen
+  // coordinates and scaled in via CSS transition. This bypasses all WebGL
+  // depth-testing issues so the restaurant logo always shows cleanly.
 
-    for (let iter = 0; iter < 20; iter++) {
-      for (let i = 0; i < items.length; i++) {
-        for (let j = i + 1; j < items.length; j++) {
-          const a = items[i], b = items[j];
-          const mx = (FW[a.sz] * a.pos.depth + FW[b.sz] * b.pos.depth) * 0.5;
-          const my = (FH[a.sz] * a.pos.depth + FH[b.sz] * b.pos.depth) * 0.5;
-          const dx = (b.pos.xPct - a.pos.xPct) * W;
-          const dy = (b.pos.yPct - a.pos.yPct) * H;
-          const nx = dx / mx, ny = dy / my;
-          const d2 = nx * nx + ny * ny;
-          if (d2 >= 1.0 || d2 < 1e-6) continue;
-          const d    = Math.sqrt(d2);
-          const push = (1 - d) * 0.60;
-          a.pos.xPct -= (nx / d) * push * mx / W;
-          a.pos.yPct -= (ny / d) * push * my / H;
-          b.pos.xPct += (nx / d) * push * mx / W;
-          b.pos.yPct += (ny / d) * push * my / H;
+  function createPeekEl(shop, hexColor) {
+    removePeekEl();
+    const el = document.createElement('div');
+    el.className = 'box-peek';
+    if (shop.logo) {
+      const img = document.createElement('img');
+      img.src = shop.logo; img.alt = '';
+      img.onerror = () => img.replaceWith(makePeekFb(shop, hexColor));
+      el.appendChild(img);
+    } else {
+      el.appendChild(makePeekFb(shop, hexColor));
+    }
+    document.getElementById('peek-layer').appendChild(el);
+    peekEl = el;
+  }
+
+  function makePeekFb(shop, hexColor) {
+    const fb = document.createElement('div');
+    fb.className = 'peek-fb';
+    fb.style.background = hexColor;
+    fb.textContent = (shop.title || '?')[0].toUpperCase();
+    return fb;
+  }
+
+  function showPeekEl() {
+    if (peekEl) peekEl.classList.add('visible');
+  }
+
+  function removePeekEl() {
+    if (!peekEl) return;
+    const el = peekEl; peekEl = null;
+    el.classList.remove('visible');
+    setTimeout(() => el.remove(), 320);
+  }
+
+  // Project the opened box's top-opening position to screen and move peekEl there.
+  const _peekV = new THREE.Vector3();
+  function updatePeekPos() {
+    if (!peekEl || openedIdx < 0 || !boxes[openedIdx]) return;
+    _peekV.copy(boxes[openedIdx].group.position);
+    _peekV.y += BODY_H / 2;   // aim at the box opening
+    const ndc = _peekV.clone().project(camera);
+    peekEl.style.left = ((ndc.x + 1) / 2 * innerWidth)  + 'px';
+    peekEl.style.top  = ((-ndc.y + 1) / 2 * innerHeight) + 'px';
+  }
+
+  // ── Responsive grid positions ─────────────────────────────────────────
+  // Supports n = 3 / 6 / 9 boxes.  Landscape vs portrait layouts.
+  function getBoxPositions(n) {
+    const ls = innerWidth >= innerHeight;
+    let pts;
+    if (n === 3) {
+      pts = ls
+        ? [[-2.20, 0, 0], [0, 0, 0], [2.20, 0, 0]]
+        : [[0, 1.80, 0], [0, 0, 0], [0, -1.80, 0]];
+    } else if (n === 9) {
+      // Landscape Y spacing = 1.60 → gap 0.40 (lid top 0.74 + body half 0.46 = 1.20 min)
+      // Portrait X spacing = 1.40 → gap 0.15 (body half-width 0.625; 1.20 min)
+      pts = ls
+        ? [[-2.20,1.60,0],[0,1.60,0],[2.20,1.60,0],
+           [-2.20,0,0],   [0,0,0],   [2.20,0,0],
+           [-2.20,-1.60,0],[0,-1.60,0],[2.20,-1.60,0]]
+        : [[-1.40,2.10,0],[0,2.10,0],[1.40,2.10,0],
+           [-1.40,0.60,0],[0,0.60,0],[1.40,0.60,0],
+           [-1.40,-0.90,0],[0,-0.90,0],[1.40,-0.90,0]];
+    } else {
+      // default: 6
+      pts = ls
+        ? [[-2.20,1.05,0],[0,1.05,0],[2.20,1.05,0],
+           [-2.20,-1.05,0],[0,-1.05,0],[2.20,-1.05,0]]
+        : [[-1.30,1.80,0],[1.30,1.80,0],
+           [-1.30,0,0],[1.30,0,0],
+           [-1.30,-1.80,0],[1.30,-1.80,0]];
+    }
+    return pts.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+  }
+
+  // ── Gift box factory ──────────────────────────────────────────────────
+  // Returns a group containing:
+  //   - Outer body shell  (FrontSide — renders exterior)
+  //   - Inner liner       (BackSide  — renders interior walls/floor from above)
+  //   - Ribbon cross
+  //   - Lid group         (animates upward on open)
+  //   - Reveal disc       (logo circle, sits atop body under lid, fades in on open)
+  function makeGiftBox(hexColor) {
+    const group    = new THREE.Group();
+    const baseCol  = new THREE.Color(hexColor);
+    const lidCol   = baseCol.clone().multiplyScalar(0.78);
+    const innerCol = baseCol.clone().multiplyScalar(0.58);  // darker interior
+
+    // Outer shell — FrontSide
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: baseCol, roughness: 0.62, metalness: 0.04, transparent: true
+    });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(BODY_W, BODY_H, BODY_D), bodyMat);
+    body.castShadow = body.receiveShadow = true;
+    group.add(body);
+
+    // Inner liner — BackSide renders interior from above:
+    // · Back and side walls visible when lid is open
+    // · Top face is invisible from above (BackSide faces away from top camera)
+    // · Floor visible looking straight down
+    const innerMat = new THREE.MeshStandardMaterial({
+      color: innerCol, roughness: 0.90, metalness: 0.0,
+      side: THREE.BackSide, transparent: true
+    });
+    const inner = new THREE.Mesh(
+      new THREE.BoxGeometry(BODY_W - 0.03, BODY_H, BODY_D - 0.03), innerMat
+    );
+    group.add(inner);
+
+    // Body ribbon cross — two thin slabs
+    const bodyRibMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 0.22, metalness: 0.12, transparent: true
+    });
+    const bR1 = new THREE.Mesh(
+      new THREE.BoxGeometry(0.10, BODY_H + 0.01, BODY_D + 0.01), bodyRibMat
+    );
+    const bR2 = new THREE.Mesh(
+      new THREE.BoxGeometry(BODY_W + 0.01, BODY_H + 0.01, 0.10), bodyRibMat
+    );
+    group.add(bR1, bR2);
+
+    // Lid group — animates upward on open
+    const lidGroup = new THREE.Group();
+    lidGroup.position.y = LID_REST_Y;
+
+    const lidMat = new THREE.MeshStandardMaterial({
+      color: lidCol, roughness: 0.62, metalness: 0.04, transparent: true
+    });
+    const lid = new THREE.Mesh(
+      new THREE.BoxGeometry(BODY_W + 0.07, LID_H, BODY_D + 0.07), lidMat
+    );
+    lid.castShadow = true;
+    lidGroup.add(lid);
+
+    const lidRibMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 0.22, metalness: 0.12, transparent: true
+    });
+    const lR1 = new THREE.Mesh(
+      new THREE.BoxGeometry(0.10, LID_H + 0.01, BODY_D + 0.09), lidRibMat
+    );
+    const lR2 = new THREE.Mesh(
+      new THREE.BoxGeometry(BODY_W + 0.09, LID_H + 0.01, 0.10), lidRibMat
+    );
+    lidGroup.add(lR1, lR2);
+
+    // Bow — squashed sphere centred on lid top
+    const bow = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), lidRibMat);
+    bow.scale.y = 0.70;
+    bow.position.y = LID_H / 2 + 0.08;
+    lidGroup.add(bow);
+
+    group.add(lidGroup);
+
+    // Inner glow disc — a colored circle deep inside the box body.
+    // Uses depthTest:false so it always renders through the top face from above.
+    // Gives a warm glowing interior effect as the lid lifts open.
+    // (The actual restaurant logo is shown via the HTML #peek-layer overlay.)
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: baseCol, transparent: true, opacity: 0,
+      depthTest: false, depthWrite: false,
+    });
+    const glowDisc = new THREE.Mesh(new THREE.CircleGeometry(0.42, 32), glowMat);
+    glowDisc.rotation.x = -Math.PI / 2;
+    glowDisc.position.y = BODY_H / 2 - 0.10;   // well inside the box
+    group.add(glowDisc);
+
+    // Collect materials for bulk opacity control
+    const solidMats = [bodyMat, innerMat, bodyRibMat, lidMat, lidRibMat];
+
+    return {
+      group, lidGroup,
+      bodyMat, innerMat, bodyRibMat, lidMat, lidRibMat,
+      glowMat,
+      solidMats,   // non-selected boxes: fade these all
+    };
+  }
+
+  // ── Scene state ───────────────────────────────────────────────────────
+  let boxes           = [];
+  let currentPositions = [];
+  let currentShops    = [];
+  let openedIdx       = -1;
+  let phase           = 'idle';   // 'idle' | 'opening' | 'done'
+  let openTimer       = 0;
+  let lastT           = 0;
+  let revealShown     = false;
+  let peekPlayed      = false;
+  let peekEl          = null;
+
+  const raycaster = new THREE.Raycaster();
+  const mouse     = new THREE.Vector2(-9999, -9999);
+  let   hoveredIdx = -1;
+
+  dieCanvas.addEventListener('mousemove', e => {
+    mouse.x =  (e.clientX / innerWidth)  * 2 - 1;
+    mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  });
+  dieCanvas.addEventListener('mouseleave', () => {
+    mouse.set(-9999, -9999); hoveredIdx = -1;
+    dieCanvas.style.cursor = gameStarted ? 'grab' : 'default';
+  });
+
+  // ── Camera orbit ──────────────────────────────────────────────────────
+  // The camera orbits around FOCUS at a fixed radius.
+  // Drag left/right → rotate azimuth; drag up/down → adjust elevation.
+  const FOCUS   = new THREE.Vector3(0, 0.2, 0);
+  const ORBIT_R = 8.877;   // matches initial camera distance to FOCUS
+  const PHI_MIN = 0.12;    // ≈7°  — camera stays above the table
+  const PHI_MAX = 1.05;    // ≈60° — max top-down angle
+  let orbitTheta = 0;      // azimuth, rad  (0 = looking from +Z)
+  let orbitPhi   = 0.394;  // elevation, rad (≈22.6°, matches initial camera)
+  let orbitVelX  = 0;      // inertia: azimuth delta per frame
+  let orbitVelY  = 0;      // inertia: elevation delta per frame
+
+  function applyOrbit() {
+    camera.position.set(
+      FOCUS.x + ORBIT_R * Math.cos(orbitPhi) * Math.sin(orbitTheta),
+      FOCUS.y + ORBIT_R * Math.sin(orbitPhi),
+      FOCUS.z + ORBIT_R * Math.cos(orbitPhi) * Math.cos(orbitTheta)
+    );
+    camera.lookAt(FOCUS);
+  }
+
+  // ── Pointer drag — orbit on drag, tap on short press ─────────────────
+  let ptrDragging = false, ptrMoved = false;
+  let ptrSx = 0, ptrSy = 0, ptrLx = 0, ptrLy = 0;
+
+  dieCanvas.addEventListener('pointerdown', e => {
+    if (!e.isPrimary) return;
+    ptrDragging = true; ptrMoved = false;
+    ptrSx = ptrLx = e.clientX;
+    ptrSy = ptrLy = e.clientY;
+    orbitVelX = orbitVelY = 0;
+    dieCanvas.setPointerCapture(e.pointerId);
+    if (gameStarted) dieCanvas.style.cursor = 'grabbing';
+    initAudio();
+  });
+
+  dieCanvas.addEventListener('pointermove', e => {
+    if (!ptrDragging || !gameStarted || phase !== 'idle') return;
+    const dx = e.clientX - ptrLx;
+    const dy = e.clientY - ptrLy;
+    ptrLx = e.clientX; ptrLy = e.clientY;
+    if (!ptrMoved && Math.hypot(e.clientX - ptrSx, e.clientY - ptrSy) > 8) ptrMoved = true;
+    if (!ptrMoved) return;
+    orbitTheta -= dx * 0.005;
+    orbitPhi    = Math.max(PHI_MIN, Math.min(PHI_MAX, orbitPhi - dy * 0.004));
+    // Store for inertia on release
+    orbitVelX   = -dx * 0.005;
+    orbitVelY   = -dy * 0.004;
+    applyOrbit();
+  });
+
+  dieCanvas.addEventListener('pointerup', e => {
+    if (!ptrDragging || !e.isPrimary) return;
+    ptrDragging = false;
+    dieCanvas.style.cursor = hoveredIdx >= 0 ? 'pointer' : (gameStarted ? 'grab' : 'default');
+    if (!ptrMoved) handleTap(e.clientX, e.clientY);
+  });
+
+  dieCanvas.addEventListener('pointercancel', () => {
+    ptrDragging = false;
+    dieCanvas.style.cursor = gameStarted ? 'grab' : 'default';
+  });
+
+  // ── pickN — pick N restaurants from a pool (wraps if pool < N) ─────────
+  function pickN(pool, n) {
+    if (!pool.length) return [];
+    const sh = [...pool].sort(() => Math.random() - 0.5);
+    return Array.from({ length: n }, (_, i) => sh[i % sh.length]);
+  }
+
+  // ── Build all gift boxes ──────────────────────────────────────────────
+  function buildBoxes(shops) {
+    const N = boxCount;
+    currentShops = Array.from({ length: N }, (_, i) => shops[i % Math.max(1, shops.length)]);
+
+    // Dispose old
+    boxes.forEach(b => {
+      b.solidMats.forEach(m => { m.map?.dispose(); m.dispose(); });
+      b.glowMat.dispose();
+      scene.remove(b.group);
+    });
+    boxes = [];
+
+    currentPositions = getBoxPositions(N);
+    const birthTime = performance.now();
+
+    for (let i = 0; i < N; i++) {
+      const ci  = i % PALETTE.length;
+      const box = makeGiftBox(PALETTE[ci].c);
+      box.group.position.copy(currentPositions[i]);
+      box.group.rotation.y = (Math.random() - 0.5) * 0.18;
+      box.group.rotation.z = (Math.random() - 0.5) * 0.06;
+      box.group.scale.setScalar(0);  // start collapsed for entrance animation
+      box.solidMats.forEach(m => { m.opacity = 1; });
+      box.glowMat.opacity = 0;
+      scene.add(box.group);
+
+      boxes.push({ ...box, shop: currentShops[i], colorIdx: ci, birthTime });
+    }
+
+    phase        = 'idle';
+    openedIdx    = -1;
+    revealShown  = false;
+    peekPlayed   = false;
+    hoveredIdx   = -1;
+  }
+
+  // ── Open a box on pick ────────────────────────────────────────────────
+  function openBox(idx) {
+    if (phase !== 'idle' || !gameStarted || idx < 0) return;
+    openedIdx    = idx;
+    phase        = 'opening';
+    openTimer    = 0;
+    revealShown  = false;
+    peekPlayed   = false;
+    document.getElementById('roll-hint').classList.add('hidden');
+    playPickSound();
+    // Pre-create peek element so the logo loads in the background
+    const b = boxes[idx];
+    createPeekEl(b.shop, PALETTE[b.colorIdx].c);
+  }
+
+  // ── Animation loop ────────────────────────────────────────────────────
+  const _sv = new THREE.Vector3();
+
+  function animate(now) {
+    requestAnimationFrame(animate);
+    const dt = Math.min((now - lastT) / 1000, 0.05);
+    lastT = now;
+    const t = now * 0.001;
+
+    // Hover detection (idle only)
+    if (gameStarted && phase === 'idle' && boxes.length) {
+      raycaster.setFromCamera(mouse, camera);
+      let newHov = -1;
+      for (let i = 0; i < boxes.length; i++) {
+        if (raycaster.intersectObject(boxes[i].group, true).length) { newHov = i; break; }
+      }
+      if (newHov !== hoveredIdx) {
+        hoveredIdx = newHov;
+        if (!ptrDragging)
+          dieCanvas.style.cursor = hoveredIdx >= 0 ? 'pointer' : 'grab';
+      }
+    }
+
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+
+      // Staggered entrance animation — easeOutBack gives a springy overshoot
+      const elapsed  = (now - b.birthTime) * 0.001;
+      const entDelay = i * 0.09;
+      const entProg  = Math.min(1, Math.max(0, (elapsed - entDelay) / 0.45));
+      const entScale = entProg < 1 ? easeOutBack(entProg) : 1;
+
+      if (phase === 'idle') {
+        // Gentle bob
+        const pos = currentPositions[i];
+        b.group.position.x = pos.x;
+        b.group.position.z = pos.z;
+        b.group.position.y = pos.y + Math.sin(t * 1.1 + BOB_OFFSETS[i]) * 0.055;
+        // Hover scale × entrance scale
+        const hoverScale = hoveredIdx === i ? 1.07 : 1.0;
+        _sv.setScalar(entScale * hoverScale);
+        b.group.scale.lerp(_sv, 0.12);
+        // Full opacity, no glow
+        b.solidMats.forEach(m => { m.opacity = 1; });
+        b.glowMat.opacity = 0;
+        b.lidGroup.position.y = LID_REST_Y;
+
+      } else if (phase === 'opening' || phase === 'done') {
+        const prog = Math.min(1, openTimer / OPEN_DUR);
+        const pos  = currentPositions[i];
+        b.group.position.set(pos.x, pos.y, pos.z);
+
+        if (i === openedIdx) {
+          // Lid rises — ease-out cubic
+          const lidEase = 1 - Math.pow(1 - Math.min(1, prog * 1.4), 2.8);
+          b.lidGroup.position.y = LID_REST_Y + lidEase * 2.4;
+
+          // Lid fades in second half of animation
+          const lidOp = Math.max(0, 1 - Math.max(0, (prog - 0.38) / 0.62));
+          b.lidMat.opacity    = lidOp;
+          b.lidRibMat.opacity = lidOp;
+          b.bodyMat.opacity   = 1;
+          b.innerMat.opacity  = 1;
+          b.bodyRibMat.opacity = 1;
+          b.group.scale.setScalar(1);
+
+          // Inner glow — fades in as lid clears (~22% into animation)
+          const peekProg = Math.max(0, Math.min(1, (prog - 0.22) / 0.30));
+          b.glowMat.opacity = peekProg * 0.65;
+
+          // Show HTML peek overlay + play sparkle at same moment
+          if (peekProg >= 0.12 && !peekPlayed) {
+            peekPlayed = true;
+            showPeekEl();
+            playSparkle();
+          }
+
+          // Keep HTML peek element centred on the box opening each frame
+          updatePeekPos();
+
+        } else {
+          // Other boxes shrink and fade
+          const sp = Math.min(1, prog * 2.8);
+          b.solidMats.forEach(m => { m.opacity = Math.max(0.04, 1 - sp * 0.90); });
+          b.glowMat.opacity = 0;
+          b.group.scale.setScalar(Math.max(0.15, 1 - sp * 0.85));
         }
       }
-      items.forEach(({ pos, sz }) => {
-        const hw = FW[sz] * pos.depth * 0.5 / W;
-        const hh = FH[sz] * pos.depth * 0.5 / H;
-        pos.xPct = Math.max(0.06 + hw, Math.min(0.94 - hw, pos.xPct));
-        pos.yPct = Math.max(0.14 + hh, Math.min(0.87 - hh, pos.yPct));
-      });
+    }
+
+    // Trigger reveal card once lid animation finishes
+    if (phase === 'opening') {
+      openTimer += dt;
+      if (openTimer >= OPEN_DUR && !revealShown) {
+        revealShown = true;
+        phase = 'done';
+        playLand();
+        setTimeout(() => {
+          playChime();
+          removePeekEl();   // hide logo glimpse before reveal card appears
+          const b = boxes[openedIdx];
+          showReveal(b.shop, b.colorIdx);
+          document.getElementById('backdrop').classList.add('visible');
+          document.getElementById('reroll-btn').style.display = 'block';
+        }, 140);
+      }
+    }
+
+    // Orbit inertia — camera coasts to a stop after drag release
+    if (!ptrDragging && (Math.abs(orbitVelX) > 0.00005 || Math.abs(orbitVelY) > 0.00005)) {
+      orbitTheta += orbitVelX;
+      orbitPhi    = Math.max(PHI_MIN, Math.min(PHI_MAX, orbitPhi + orbitVelY));
+      orbitVelX  *= 0.88;
+      orbitVelY  *= 0.88;
+      applyOrbit();
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  requestAnimationFrame(t => { lastT = t; requestAnimationFrame(animate); });
+
+  // ── Touch / click ─────────────────────────────────────────────────────
+  function handleTap(clientX, clientY) {
+    if (!gameStarted || phase !== 'idle') return;
+    const mx =  (clientX / innerWidth)  * 2 - 1;
+    const my = -(clientY / innerHeight) * 2 + 1;
+    raycaster.setFromCamera(new THREE.Vector2(mx, my), camera);
+    for (let i = 0; i < boxes.length; i++) {
+      if (raycaster.intersectObject(boxes[i].group, true).length) {
+        openBox(i); return;
+      }
     }
   }
 
-  // ── Dust puff ─────────────────────────────────────────────
-  function spawnDust(el) {
-    const r    = el.getBoundingClientRect();
-    const dust = document.createElement('div');
-    dust.className = 'dust';
-    dust.style.left = `${r.left + r.width  * 0.5}px`;
-    dust.style.top  = `${r.top  + r.height * 0.88}px`;
-    document.body.appendChild(dust);
-    setTimeout(() => dust.remove(), 600);
+  // (click / touchend replaced by pointer drag handlers above)
+
+  // ── Reveal card ───────────────────────────────────────────────────────
+  function triggerPopIn(el) {
+    el.classList.remove('popping');
+    void el.offsetWidth;
+    el.classList.add('popping');
+    setTimeout(() => el.classList.remove('popping'), 700);
   }
 
-  // ── Box factory ───────────────────────────────────────────
-  function makeBox(shop, pos, szKey) {
-    const ci      = colorForShop();
-    const { c, cd } = PALETTE[ci];
-    const label   = labelForShop(shop);
-
-    const el = document.createElement('div');
-    el.className = `box ${szKey}`;
-    el.style.left   = `${(pos.xPct * 100).toFixed(2)}%`;
-    el.style.top    = `${(pos.yPct * 100).toFixed(2)}%`;
-    el.style.zIndex = Math.round(pos.depth * 15);
-    el.style.setProperty('--c',     c);
-    el.style.setProperty('--cd',    cd);
-    el.style.setProperty('--rot',   `${pos.rot}deg`);
-    el.style.setProperty('--depth', pos.depth.toFixed(3));
-    el.style.setProperty('--bx', `${(12 + (Math.random() - 0.5) * 8).toFixed(1)}deg`);
-    el.style.setProperty('--by', `${(-18 + (Math.random() - 0.5) * 8).toFixed(1)}deg`);
-    el.style.setProperty('--sdw',  `${(pos.depth * 11).toFixed(1)}px`);
-    el.style.setProperty('--sbl',  `${(pos.depth * 14).toFixed(1)}px`);
-    el.style.setProperty('--sda',  (0.10 + pos.depth * 0.22).toFixed(3));
-    el.style.setProperty('--sda2', (0.04 + pos.depth * 0.09).toFixed(3));
-    el.style.opacity = (0.62 + pos.depth * 0.38).toFixed(2);
-    el.innerHTML = `
-      <div class="b-shadow"></div>
-      <div class="b-scene">
-        <div class="b-lid">
-          <div class="b-lt"></div>
-          <div class="b-lr"></div>
-          <div class="b-ll"></div>
-          <div class="b-li"></div>
-          <div class="b-lf"><div class="b-hdl"></div></div>
-        </div>
-        <div class="b-body">
-          <div class="b-br"></div>
-          <div class="b-bl"></div>
-          <div class="b-bt"></div>
-          <div class="b-bf">
-            <div class="b-tape"></div>
-            <span class="b-q">${label}</span>
-          </div>
-        </div>
-      </div>`;
-    el._shop = shop;
-    el._ci   = ci;
-
-    el.addEventListener('mousemove', e => {
-      if (openedBox || el.classList.contains('dimmed')) return;
-      const r  = el.getBoundingClientRect();
-      const nx = (e.clientX - r.left) / r.width  - 0.5;
-      const ny = (e.clientY - r.top)  / r.height - 0.5;
-      el.style.setProperty('--tx',   `${-ny * 14}deg`);
-      el.style.setProperty('--ty',   `${nx  * 14}deg`);
-      el.style.setProperty('--lift', '-11px');
-      el.style.setProperty('--scl',  '1.06');
-      el.classList.add('hovered');
-    });
-    el.addEventListener('mouseleave', () => resetHover(el));
-
-    el.addEventListener('click', () => {
-      if (openedBox || el.classList.contains('dimmed')) return;
-      openBox(el);
-    });
-    el.addEventListener('touchend', e => {
-      e.preventDefault();
-      if (openedBox || el.classList.contains('dimmed')) return;
-      openBox(el);
-    }, { passive: false });
-
-    return el;
-  }
-
-  function resetHover(el) {
-    el.style.setProperty('--tx',   '0deg');
-    el.style.setProperty('--ty',   '0deg');
-    el.style.setProperty('--lift', '0px');
-    el.style.setProperty('--scl',  '1');
-    el.classList.remove('hovered');
-  }
-
-  // ── Open / dismiss ────────────────────────────────────────
-  function openBox(el) {
-    openedBox = el;
-    el.classList.add('open');
-    resetHover(el);
-    document.querySelectorAll('.box').forEach(b => { if (b !== el) b.classList.add('dimmed'); });
-    document.getElementById('backdrop').classList.add('visible');
-    document.getElementById('repick-btn').style.display = 'block';
-    playThud(0.55);
-    setTimeout(() => { showReveal(el._shop, el._ci); playChime(); }, 420);
-  }
-
-  function dismiss() {
-    if (!openedBox) return;
-    openedBox.classList.remove('open');
-    openedBox = null;
-    hideReveal();
-    document.querySelectorAll('.box').forEach(b => b.classList.remove('dimmed'));
-    document.getElementById('backdrop').classList.remove('visible');
-    document.getElementById('repick-btn').style.display = 'none';
-  }
-
-  // ── Reveal ────────────────────────────────────────────────
   function showReveal(shop, ci) {
     const card = document.getElementById('reveal-card');
     const logo = document.getElementById('rev-logo');
@@ -1215,94 +1198,181 @@
     const src = shop.logo || '';
     if (src) {
       logo.src = src; logo.style.display = 'block'; fb.style.display = 'none';
-      logo.onerror = () => { logo.style.display = 'none'; fb.style.display = 'flex'; };
+      triggerPopIn(logo);
+      logo.onerror = () => {
+        logo.style.display = 'none';
+        fb.style.display   = 'flex';
+        fb.textContent     = (shop.title || '?')[0].toUpperCase();
+        triggerPopIn(fb);
+      };
     } else {
       logo.style.display = 'none';
       fb.style.display   = 'flex';
       fb.textContent     = (shop.title || '?')[0].toUpperCase();
+      triggerPopIn(fb);
     }
     document.getElementById('rev-name').textContent  = shop.title || 'Unknown';
     document.getElementById('rev-venue').textContent = shop.venue  || '';
     document.getElementById('reveal-overlay').classList.add('visible');
+
+    // Confetti bursts from the opened box's screen position
+    let cx = innerWidth * 0.5, cy = innerHeight * 0.40;
+    if (openedIdx >= 0 && boxes[openedIdx]) {
+      const wp = boxes[openedIdx].group.position.clone().project(camera);
+      cx = (wp.x + 1) / 2 * innerWidth;
+      cy = (-wp.y + 1) / 2 * innerHeight;
+    }
+    spawnConfetti(PALETTE[ci].c, cx, cy);
   }
+
   function hideReveal() {
     document.getElementById('reveal-overlay').classList.remove('visible');
   }
 
-  // ── Start round ───────────────────────────────────────────
-  function startRound() {
-    _colorIdx = 0;
-    const stage  = document.getElementById('stage');
-    const mobile = innerWidth <= 600;
-    const pool   = getFilteredShops();
-    const count  = Math.min(pool.length, mobile ? 12 : 24);
-    const chosen = pickRandom(pool, count);
-    const scatter= computeScatter(count);
-    const stagger= Math.min(75, Math.max(28, 900 / count));
-
-    const items = chosen.map((shop, i) => ({
-      shop,
-      pos: scatter[i],
-      sz:  sizeForDepth(scatter[i].zFloor),
+  // ── Confetti ──────────────────────────────────────────────────────────
+  function spawnConfetti(primaryColor, cx, cy) {
+    const cv = document.createElement('canvas');
+    cv.style.cssText = 'position:fixed;inset:0;z-index:1002;pointer-events:none;';
+    cv.width = innerWidth; cv.height = innerHeight;
+    document.body.appendChild(cv);
+    const ctx = cv.getContext('2d');
+    const colors = [primaryColor, '#FF6B35', '#FFD23F', '#06D6A0', '#EF476F', '#9D4EDD', '#fff'];
+    const pts = Array.from({ length: 72 }, () => ({
+      x: cx, y: cy,
+      vx: (Math.random() - 0.5) * 24, vy: (Math.random() - 0.94) * 20,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rot: Math.random() * Math.PI * 2, rV: (Math.random() - 0.5) * 0.30,
+      shape: Math.random() < 0.5 ? 'rect' : 'circle',
+      r: 3.5 + Math.random() * 4, w: 7 + Math.random() * 6, h: 3 + Math.random() * 4,
     }));
+    let life = 0;
+    (function tick() {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      life++;
+      const alpha = life < 65 ? 1 : 1 - (life - 65) / 35;
+      for (const p of pts) {
+        p.vy += 0.44; p.vx *= 0.97; p.vy *= 0.97;
+        p.x += p.vx; p.y += p.vy; p.rot += p.rV;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, alpha);
+        ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        if (p.shape === 'circle') { ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill(); }
+        else ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      if (life < 100) requestAnimationFrame(tick);
+      else cv.remove();
+    })();
+  }
 
-    separatePositions(items, innerWidth, innerHeight);
-
-    const featureIdx = items.reduce((best, item, i) => {
-      const score  = item.pos.depth * 2 - Math.abs(item.pos.xPct - 0.5) * 2.5;
-      const bScore = items[best].pos.depth * 2 - Math.abs(items[best].pos.xPct - 0.5) * 2.5;
-      return score > bScore ? i : best;
-    }, 0);
-
-    stage.querySelectorAll('.box').forEach(b => b.remove());
-    openedBox = null;
+  // ── Dismiss + rebuild ─────────────────────────────────────────────────
+  function dismiss() {
     hideReveal();
+    removePeekEl();
     document.getElementById('backdrop').classList.remove('visible');
-    document.getElementById('repick-btn').style.display = 'none';
+    document.getElementById('reroll-btn').style.display = 'none';
+    buildBoxes(pickN(getFilteredShops(), boxCount));
+    document.getElementById('roll-hint').classList.remove('hidden');
+  }
 
-    items.forEach(({ shop, pos, sz }, i) => {
-      const dur = 580 + Math.random() * 80;
-      const el  = makeBox(shop, pos, sz);
-      if (i === featureIdx) el.classList.add('featured');
+  document.getElementById('backdrop').addEventListener('click', dismiss);
+  document.getElementById('rev-close').addEventListener('click', dismiss);
+  document.getElementById('reroll-btn').addEventListener('click', dismiss);
 
-      if (i !== featureIdx && Math.random() < 0.25) el.classList.add('ajar');
+  // ── Shuffle ───────────────────────────────────────────────────────────
+  function shuffleBoxes() {
+    if (!gameStarted || phase !== 'idle') return;
+    const btn = document.getElementById('refresh-btn');
+    btn.classList.add('spinning');
+    setTimeout(() => btn.classList.remove('spinning'), 520);
+    buildBoxes(pickN(getFilteredShops(), boxCount));
+    document.getElementById('roll-hint').classList.remove('hidden');
+  }
 
-      el.classList.add('falling');
-      el.style.setProperty('--fall-dur', `${dur}ms`);
-      el.style.setProperty('--fall-del', `${i * stagger}ms`);
+  document.getElementById('refresh-btn').addEventListener('click', () => {
+    initAudio(); shuffleBoxes();
+  });
 
-      const t0 = i * stagger;
-      const bdI = 0.35 + Math.random() * 0.50;
-      setTimeout(() => { playBassThud(bdI); playThud(bdI * 0.55); }, t0 + dur * 0.66);
-      setTimeout(() => playThud(0.07 + Math.random() * 0.11), t0 + dur * 0.85);
+  // ── Browse All ────────────────────────────────────────────────────────
+  function openBrowse() {
+    const shops = getFilteredShops().slice().sort((a, b) =>
+      (a.title || '').localeCompare(b.title || '')
+    );
+    buildBrowseList(shops);
+    document.getElementById('browse-backdrop').classList.add('visible');
+    document.getElementById('browse-sheet').classList.add('visible');
+  }
 
-      el.querySelector('.b-scene').addEventListener('animationend', () => {
-        el.classList.remove('falling');
-        el.style.zIndex = Math.round(pos.depth * 15);
-        spawnDust(el);
-      }, { once: true });
+  function closeBrowse() {
+    document.getElementById('browse-backdrop').classList.remove('visible');
+    document.getElementById('browse-sheet').classList.remove('visible');
+  }
 
-      stage.appendChild(el);
+  function buildBrowseList(shops) {
+    const list = document.getElementById('browse-list');
+    list.innerHTML = '';
+    document.getElementById('browse-count').textContent = `(${shops.length})`;
+
+    shops.forEach((s, i) => {
+      const ci   = s.title.charCodeAt(0) % PALETTE.length;
+      const item = document.createElement('div');
+      item.className = 'browse-item browse-item--enter';
+      item.style.setProperty('--i', Math.min(i, 20));
+
+      if (s.logo) {
+        const img = document.createElement('img');
+        img.className = 'browse-item-logo'; img.src = s.logo; img.alt = '';
+        img.onerror = () => img.replaceWith(makeFbEl(s, ci));
+        item.appendChild(img);
+      } else {
+        item.appendChild(makeFbEl(s, ci));
+      }
+
+      const info  = document.createElement('div'); info.className = 'browse-item-info';
+      const name  = document.createElement('div'); name.className = 'browse-item-name';
+      name.textContent = s.title || '';
+      info.appendChild(name);
+      if (s.venue) {
+        const venue = document.createElement('div'); venue.className = 'browse-item-venue';
+        venue.textContent = s.venue; info.appendChild(venue);
+      }
+      item.appendChild(info);
+      item.addEventListener('click', () => { initAudio(); showRevealDirect(s, ci); });
+      list.appendChild(item);
     });
   }
 
-  // ── Listeners ─────────────────────────────────────────────
-  document.getElementById('backdrop').addEventListener('click', dismiss);
+  function makeFbEl(shop, ci) {
+    const fb = document.createElement('div');
+    fb.className = 'browse-item-logo-fb';
+    fb.style.background = PALETTE[ci].c;
+    fb.textContent = (shop.title || '?')[0].toUpperCase();
+    return fb;
+  }
 
-  document.getElementById('repick-btn').addEventListener('click', () => {
-    dismiss();
-    [...document.querySelectorAll('.box')].forEach((b, i) => {
-      const scene = b.querySelector('.b-scene');
-      if (scene) {
-        scene.style.transition = `opacity 0.18s ease ${i * 22}ms, transform 0.22s ease ${i * 22}ms`;
-        scene.style.opacity    = '0';
-        scene.style.transform  = `perspective(900px) rotate(var(--rot)) translateY(22px) scale(0.86) rotateX(var(--bx)) rotateY(var(--by))`;
-      }
-    });
-    setTimeout(startRound, 280);
+  // Show a result directly from the browse list (no box animation)
+  function showRevealDirect(shop, ci) {
+    closeBrowse();
+    openedIdx = -1;  // confetti bursts from screen centre
+    showReveal(shop, ci);
+    document.getElementById('backdrop').classList.add('visible');
+    document.getElementById('reroll-btn').style.display = 'block';
+  }
+
+  document.getElementById('browse-btn').addEventListener('click', openBrowse);
+  document.getElementById('browse-backdrop').addEventListener('click', closeBrowse);
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (document.getElementById('browse-sheet').classList.contains('visible')) closeBrowse();
+      else if (document.getElementById('reveal-overlay').classList.contains('visible')) dismiss();
+    }
+    if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey) shuffleBoxes();
   });
 
-  // ── Init ──────────────────────────────────────────────────
+  // ── Init ──────────────────────────────────────────────────────────────
   async function init() {
     const overlay   = document.getElementById('loading-overlay');
     const loadState = document.getElementById('loading-state');
@@ -1317,9 +1387,20 @@
       tapBtn.addEventListener('click', () => {
         if (tapBtn.disabled) return;
         initAudio();
-        overlay.style.opacity      = '0';
+        buildBoxes(pickN(getFilteredShops(), boxCount));
+        overlay.style.opacity       = '0';
         overlay.style.pointerEvents = 'none';
-        setTimeout(() => { overlay.style.display = 'none'; startRound(); }, 400);
+        setTimeout(() => {
+          overlay.style.display = 'none';
+          gameStarted = true;
+          lastOrient  = innerWidth >= innerHeight;
+          dieCanvas.style.cursor = 'grab';
+          document.getElementById('bg-particles').style.display = 'block';
+          document.getElementById('game-badge').style.display   = 'block';
+          document.getElementById('refresh-btn').style.display  = 'block';
+          document.getElementById('browse-btn').style.display   = 'block';
+          document.getElementById('roll-hint').classList.remove('hidden');
+        }, 420);
       }, { once: true });
 
     } catch (e) {
@@ -1330,7 +1411,6 @@
   }
 
   init();
-
   </script>
 </body>
 </html>
