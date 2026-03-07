@@ -634,9 +634,9 @@
   const dieCanvas = document.getElementById('die-canvas');
   const scene     = new THREE.Scene();
 
-  // Camera from above-front: looking down at ~22° so you can see into open box tops
+  // Camera from above-front — position set per box count via applyCameraPreset()
   const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
-  camera.position.set(0, 3.6, 8.2);
+  camera.position.set(0, 3.6, 8.2);   // placeholder — overridden by applyCameraPreset
   camera.lookAt(0, 0.2, 0);
 
   const renderer = new THREE.WebGLRenderer({ canvas: dieCanvas, antialias: true, alpha: true });
@@ -703,9 +703,8 @@
 
   // ── Box constants ─────────────────────────────────────────────────────
   const BODY_W = 1.25, BODY_H = 0.92, BODY_D = 1.25, LID_H = 0.28;
-  const LID_REST_Y = BODY_H / 2 + LID_H / 2;   // 0.60
   const BOB_OFFSETS = [0, 1.05, 2.10, 0.55, 1.60, 2.85, 0.35, 1.75, 0.90];
-  const OPEN_DUR = 0.70;
+  const OPEN_DUR = 1.20;
 
   // ── Ease helper ───────────────────────────────────────────────────────
   function easeOutBack(t) {
@@ -775,15 +774,13 @@
         ? [[-2.20, 0, 0], [0, 0, 0], [2.20, 0, 0]]
         : [[0, 1.80, 0], [0, 0, 0], [0, -1.80, 0]];
     } else if (n === 9) {
-      // Landscape Y spacing = 1.60 → gap 0.40 (lid top 0.74 + body half 0.46 = 1.20 min)
-      // Portrait X spacing = 1.40 → gap 0.15 (body half-width 0.625; 1.20 min)
       pts = ls
-        ? [[-2.20,1.60,0],[0,1.60,0],[2.20,1.60,0],
-           [-2.20,0,0],   [0,0,0],   [2.20,0,0],
-           [-2.20,-1.60,0],[0,-1.60,0],[2.20,-1.60,0]]
-        : [[-1.40,2.10,0],[0,2.10,0],[1.40,2.10,0],
-           [-1.40,0.60,0],[0,0.60,0],[1.40,0.60,0],
-           [-1.40,-0.90,0],[0,-0.90,0],[1.40,-0.90,0]];
+        ? [[-2.80,2.00,0],[0,2.00,0],[2.80,2.00,0],
+           [-2.80,0,0],   [0,0,0],   [2.80,0,0],
+           [-2.80,-2.00,0],[0,-2.00,0],[2.80,-2.00,0]]
+        : [[-1.70,2.50,0],[0,2.50,0],[1.70,2.50,0],
+           [-1.70,0.60,0],[0,0.60,0],[1.70,0.60,0],
+           [-1.70,-1.30,0],[0,-1.30,0],[1.70,-1.30,0]];
     } else {
       // default: 6
       pts = ls
@@ -796,105 +793,220 @@
     return pts.map(([x, y, z]) => new THREE.Vector3(x, y, z));
   }
 
-  // ── Gift box factory ──────────────────────────────────────────────────
-  // Returns a group containing:
-  //   - Outer body shell  (FrontSide — renders exterior)
-  //   - Inner liner       (BackSide  — renders interior walls/floor from above)
-  //   - Ribbon cross
-  //   - Lid group         (animates upward on open)
-  //   - Reveal disc       (logo circle, sits atop body under lid, fades in on open)
-  function makeGiftBox(hexColor) {
-    const group    = new THREE.Group();
-    const baseCol  = new THREE.Color(hexColor);
-    const lidCol   = baseCol.clone().multiplyScalar(0.78);
-    const innerCol = baseCol.clone().multiplyScalar(0.58);  // darker interior
+  // ── Color helpers (from box.js) ──────────────────────────────────────
+  function _darken(hex, amount = 0.12) {
+    const c = new THREE.Color(hex); const hsl = {}; c.getHSL(hsl);
+    c.setHSL(hsl.h, hsl.s, Math.max(0, hsl.l - amount)); return c;
+  }
+  function _lighten(hex, amount = 0.08) {
+    const c = new THREE.Color(hex); const hsl = {}; c.getHSL(hsl);
+    c.setHSL(hsl.h, hsl.s, Math.min(1, hsl.l + amount)); return c;
+  }
 
-    // Outer shell — FrontSide
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: baseCol, roughness: 0.62, metalness: 0.04, transparent: true
+  // ── Gift box factory (box.js implementation) ───────────────────────────
+  // Open-top body walls, ribbons on all faces, crumpled paper,
+  // detailed bow (torus loops + ribbon tails), hinge-opening lid pivot.
+  function makeGiftBox(hexColor) {
+    const group = new THREE.Group();
+    const geometries = [];
+    const geo = g => { geometries.push(g); return g; };
+
+    const size = BODY_W, bodyHeight = BODY_H, lidHeight = LID_H;
+    const thick = 0.06, lidGap = 0.02, lidOver = 0.06;
+    const paperFill = 0.80;
+    const lidOpenAngle = -Math.PI * 0.4;
+
+    // Colors: auto-derive lid (darker) and bow (lighter ribbon)
+    const boxCol = new THREE.Color(hexColor);
+    const lidCol = _darken(hexColor);
+    const ribCol = new THREE.Color('#f1c40f');
+    const bowCol = _lighten('#f1c40f');
+
+    const boxMat = new THREE.MeshPhongMaterial({ color: boxCol, shininess: 40 });
+    const lidMat = new THREE.MeshPhongMaterial({ color: lidCol, shininess: 40 });
+    const ribMat = new THREE.MeshPhongMaterial({ color: ribCol, shininess: 80, specular: 0xffffff });
+    const bowMat = new THREE.MeshPhongMaterial({ color: bowCol, shininess: 100, specular: 0xffffff });
+    const materials = [boxMat, lidMat, ribMat, bowMat];
+
+    // ── Ribbon helper ──
+    function addRibbons(parent, ro) {
+      const rW = 0.22 * (size / 2), rT = 0.02, rOut = thick / 2 + rT / 2;
+      const vH = ro.height - 0.02;
+      [ro.wallOffZ, -ro.wallOffZ].forEach(z => {
+        const m = new THREE.Mesh(geo(new THREE.BoxGeometry(rW, vH, rT)), ribMat);
+        m.position.set(0, 0, z > 0 ? z + rOut : z - rOut); parent.add(m);
+      });
+      [ro.wallOffX, -ro.wallOffX].forEach(x => {
+        const m = new THREE.Mesh(geo(new THREE.BoxGeometry(rT, vH, rW)), ribMat);
+        m.position.set(x > 0 ? x + rOut : x - rOut, 0, 0); parent.add(m);
+      });
+      if (ro.hasHorizontal !== false) {
+        [ro.wallOffZ, -ro.wallOffZ].forEach(z => {
+          const m = new THREE.Mesh(geo(new THREE.BoxGeometry(ro.width + 0.002, rW, rT)), ribMat);
+          m.position.set(0, 0, z > 0 ? z + rOut : z - rOut); parent.add(m);
+        });
+        [ro.wallOffX, -ro.wallOffX].forEach(x => {
+          const m = new THREE.Mesh(geo(new THREE.BoxGeometry(rT, rW, ro.depth + 0.002)), ribMat);
+          m.position.set(x > 0 ? x + rOut : x - rOut, 0, 0); parent.add(m);
+        });
+      }
+      if (ro.hasBottom && ro.bottomOff !== undefined) {
+        const bO = ro.bottomOff + thick / 2 + rT / 2 + 0.01;
+        const m1 = new THREE.Mesh(geo(new THREE.BoxGeometry(rW, rT, ro.depth + 0.002)), ribMat);
+        m1.position.y = -bO; parent.add(m1);
+        const m2 = new THREE.Mesh(geo(new THREE.BoxGeometry(ro.width + 0.002, rT, rW)), ribMat);
+        m2.position.y = -bO; parent.add(m2);
+      }
+      if (ro.hasTop && ro.topOff !== undefined) {
+        const tO = ro.topOff + thick / 2 + rT / 2 + 0.01;
+        const m1 = new THREE.Mesh(geo(new THREE.BoxGeometry(rW, rT, ro.depth + 0.002)), ribMat);
+        m1.position.y = tO; parent.add(m1);
+        const m2 = new THREE.Mesh(geo(new THREE.BoxGeometry(ro.width + 0.002, rT, rW)), ribMat);
+        m2.position.y = tO; parent.add(m2);
+      }
+    }
+
+    // ── Box body (open-top — 4 walls + floor) ──
+    const body = new THREE.Group();
+    const bOff = (bodyHeight - thick) / 2;
+    const bWallOff = (size - thick) / 2;
+    const bInner = size - 2 * thick;
+    [
+      { d: [size, bodyHeight, thick], p: [0, 0, bWallOff] },
+      { d: [size, bodyHeight, thick], p: [0, 0, -bWallOff] },
+      { d: [thick, bodyHeight, bInner], p: [bWallOff, 0, 0] },
+      { d: [thick, bodyHeight, bInner], p: [-bWallOff, 0, 0] },
+      { d: [size, thick, size], p: [0, -bOff, 0] },
+    ].forEach(({ d, p }) => {
+      const m = new THREE.Mesh(geo(new THREE.BoxGeometry(...d)), boxMat);
+      m.position.set(...p); m.castShadow = m.receiveShadow = true; body.add(m);
     });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(BODY_W, BODY_H, BODY_D), bodyMat);
-    body.castShadow = body.receiveShadow = true;
+    addRibbons(body, {
+      wallOffX: bWallOff, wallOffZ: bWallOff,
+      height: bodyHeight, width: size, depth: size,
+      bottomOff: bOff, hasBottom: true, hasTop: false,
+    });
+
+    // ── Crumpled paper fill ──
+    const pMat = new THREE.MeshPhongMaterial({
+      color: new THREE.Color('#faf0e6'), shininess: 5,
+      side: THREE.DoubleSide, flatShading: true,
+    });
+    materials.push(pMat);
+    const innerHW = size / 2 - thick - 0.02;
+    const fillH = bodyHeight * paperFill;
+    const botY = -bodyHeight / 2 + thick / 2;
+    const topY = botY + fillH;
+    const pcs = Math.round(120 * (size / 2) * (size / 2) * (paperFill / 0.95));
+    const mg = 0.18;
+    for (let pi = 0; pi < pcs; pi++) {
+      const r = 0.1 + Math.random() * 0.08;
+      const cx = (Math.random() - 0.5) * (innerHW * 2 - mg * 2);
+      const cy = botY + mg + Math.random() * (fillH - mg * 2);
+      const cz = (Math.random() - 0.5) * (innerHW * 2 - mg * 2);
+      const ig = geo(new THREE.IcosahedronGeometry(r, 2));
+      const pos = ig.attributes.position;
+      for (let j = 0; j < pos.count; j++) {
+        let vx = pos.getX(j), vy = pos.getY(j), vz = pos.getZ(j);
+        const len = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        const noise = 1 + (Math.random() - 0.5) * 0.5;
+        vx = vx / len * r * noise; vy = vy / len * r * noise; vz = vz / len * r * noise;
+        if (Math.abs(cx + vx) > innerHW) vx = Math.sign(cx + vx) * innerHW - cx;
+        if (cy + vy < botY) vy = botY - cy;
+        if (cy + vy > topY) vy = topY - cy;
+        if (Math.abs(cz + vz) > innerHW) vz = Math.sign(cz + vz) * innerHW - cz;
+        pos.setXYZ(j, vx, vy, vz);
+      }
+      ig.computeVertexNormals();
+      const pm = pMat.clone(); materials.push(pm);
+      const hs = (Math.random() - 0.5) * 0.03;
+      pm.color.setHSL(0.1 + hs, 0.08 + Math.random() * 0.05, 0.9 + Math.random() * 0.07);
+      const mesh = new THREE.Mesh(ig, pm);
+      mesh.position.set(cx, cy, cz);
+      mesh.rotation.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
+      mesh.scale.set(0.8 + Math.random() * 0.4, 0.6 + Math.random() * 0.4, 0.8 + Math.random() * 0.4);
+      body.add(mesh);
+    }
+    body.position.y = 0;
     group.add(body);
 
-    // Inner liner — BackSide renders interior from above:
-    // · Back and side walls visible when lid is open
-    // · Top face is invisible from above (BackSide faces away from top camera)
-    // · Floor visible looking straight down
-    const innerMat = new THREE.MeshStandardMaterial({
-      color: innerCol, roughness: 0.90, metalness: 0.0,
-      side: THREE.BackSide, transparent: true
+    // ── Lid (open-bottom — 4 walls + top) ──
+    const lid = new THREE.Group();
+    const lidSize = size + lidOver * 2;
+    const lOff = (lidHeight - thick) / 2;
+    const lWallOff = (lidSize - thick) / 2;
+    const lInner = lidSize - 2 * thick;
+    [
+      { d: [lidSize, lidHeight, thick], p: [0, 0, lWallOff] },
+      { d: [lidSize, lidHeight, thick], p: [0, 0, -lWallOff] },
+      { d: [thick, lidHeight, lInner], p: [lWallOff, 0, 0] },
+      { d: [thick, lidHeight, lInner], p: [-lWallOff, 0, 0] },
+      { d: [lidSize, thick, lidSize], p: [0, lOff, 0] },
+    ].forEach(({ d, p }) => {
+      const m = new THREE.Mesh(geo(new THREE.BoxGeometry(...d)), lidMat);
+      m.position.set(...p); m.castShadow = m.receiveShadow = true; lid.add(m);
     });
-    const inner = new THREE.Mesh(
-      new THREE.BoxGeometry(BODY_W - 0.03, BODY_H, BODY_D - 0.03), innerMat
-    );
-    group.add(inner);
-
-    // Body ribbon cross — two thin slabs
-    const bodyRibMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff, roughness: 0.22, metalness: 0.12, transparent: true
+    addRibbons(lid, {
+      wallOffX: lWallOff, wallOffZ: lWallOff,
+      height: lidHeight, width: lidSize, depth: lidSize,
+      topOff: lOff, hasBottom: false, hasTop: true, hasHorizontal: false,
     });
-    const bR1 = new THREE.Mesh(
-      new THREE.BoxGeometry(0.10, BODY_H + 0.01, BODY_D + 0.01), bodyRibMat
-    );
-    const bR2 = new THREE.Mesh(
-      new THREE.BoxGeometry(BODY_W + 0.01, BODY_H + 0.01, 0.10), bodyRibMat
-    );
-    group.add(bR1, bR2);
 
-    // Lid group — animates upward on open
-    const lidGroup = new THREE.Group();
-    lidGroup.position.y = LID_REST_Y;
+    // ── Bow (torus loops + knot + ribbon tails) ──
+    const rThick = 0.02;
+    const lTopOut = lOff + thick / 2 + rThick / 2;
+    const bowGrp = new THREE.Group();
+    for (let a = -1; a <= 1; a += 2) {
+      const loop = new THREE.Mesh(geo(new THREE.TorusGeometry(0.28, 0.06, 12, 24)), bowMat);
+      loop.rotation.x = Math.PI / 2; loop.rotation.z = a * 0.6;
+      loop.scale.set(1, 0.5, 1); loop.position.set(a * 0.15, 0.06, 0);
+      bowGrp.add(loop);
+    }
+    for (let a = -1; a <= 1; a += 2) {
+      const loop = new THREE.Mesh(geo(new THREE.TorusGeometry(0.22, 0.05, 12, 24)), bowMat);
+      loop.rotation.z = Math.PI / 2; loop.rotation.x = a * 0.6;
+      loop.scale.set(1, 0.5, 1); loop.position.set(0, 0.08, a * 0.12);
+      bowGrp.add(loop);
+    }
+    const knot = new THREE.Mesh(geo(new THREE.SphereGeometry(0.12, 16, 16)), bowMat);
+    knot.scale.y = 0.6; knot.position.y = 0.04; bowGrp.add(knot);
+    for (let s = -1; s <= 1; s += 2) {
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.quadraticCurveTo(s * 0.15, -0.2, s * 0.35, -0.45);
+      shape.lineTo(s * 0.25, -0.35);
+      shape.quadraticCurveTo(s * 0.1, -0.15, 0, 0);
+      const tail = new THREE.Mesh(geo(new THREE.ShapeGeometry(shape)), bowMat);
+      tail.rotation.x = -0.3; tail.position.y = -0.02; bowGrp.add(tail);
+    }
+    bowGrp.position.y = lTopOut + 0.01;
+    lid.add(bowGrp);
 
-    const lidMat = new THREE.MeshStandardMaterial({
-      color: lidCol, roughness: 0.62, metalness: 0.04, transparent: true
-    });
-    const lid = new THREE.Mesh(
-      new THREE.BoxGeometry(BODY_W + 0.07, LID_H, BODY_D + 0.07), lidMat
-    );
-    lid.castShadow = true;
-    lidGroup.add(lid);
+    // ── Lid pivot (hinge at back edge) ──
+    const lidPivot = new THREE.Group();
+    lidPivot.position.y = bodyHeight / 2 + lidGap;
+    lidPivot.position.z = -lidSize / 2;
+    lid.position.y = lidHeight / 2;
+    lid.position.z = lidSize / 2;
+    lidPivot.add(lid);
+    group.add(lidPivot);
 
-    const lidRibMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff, roughness: 0.22, metalness: 0.12, transparent: true
-    });
-    const lR1 = new THREE.Mesh(
-      new THREE.BoxGeometry(0.10, LID_H + 0.01, BODY_D + 0.09), lidRibMat
-    );
-    const lR2 = new THREE.Mesh(
-      new THREE.BoxGeometry(BODY_W + 0.09, LID_H + 0.01, 0.10), lidRibMat
-    );
-    lidGroup.add(lR1, lR2);
-
-    // Bow — squashed sphere centred on lid top
-    const bow = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), lidRibMat);
-    bow.scale.y = 0.70;
-    bow.position.y = LID_H / 2 + 0.08;
-    lidGroup.add(bow);
-
-    group.add(lidGroup);
-
-    // Inner glow disc — a colored circle deep inside the box body.
-    // Uses depthTest:false so it always renders through the top face from above.
-    // Gives a warm glowing interior effect as the lid lifts open.
-    // (The actual restaurant logo is shown via the HTML #peek-layer overlay.)
+    // ── Inner glow disc ──
     const glowMat = new THREE.MeshBasicMaterial({
-      color: baseCol, transparent: true, opacity: 0,
+      color: boxCol, transparent: true, opacity: 0,
       depthTest: false, depthWrite: false,
     });
-    const glowDisc = new THREE.Mesh(new THREE.CircleGeometry(0.42, 32), glowMat);
+    const glowDisc = new THREE.Mesh(geo(new THREE.CircleGeometry(0.35, 32)), glowMat);
     glowDisc.rotation.x = -Math.PI / 2;
-    glowDisc.position.y = BODY_H / 2 - 0.10;   // well inside the box
+    glowDisc.position.y = bodyHeight / 2 - 0.08;
     group.add(glowDisc);
 
-    // Collect materials for bulk opacity control
-    const solidMats = [bodyMat, innerMat, bodyRibMat, lidMat, lidRibMat];
-
     return {
-      group, lidGroup,
-      bodyMat, innerMat, bodyRibMat, lidMat, lidRibMat,
-      glowMat,
-      solidMats,   // non-selected boxes: fade these all
+      group, lidPivot, glowMat,
+      lidMat, bowMat, boxMat, ribMat,
+      materials,    // all materials for bulk opacity
+      geometries,   // all geometries for disposal
+      lidOpenAngle,
     };
   }
 
@@ -903,8 +1015,13 @@
   let currentPositions = [];
   let currentShops    = [];
   let openedIdx       = -1;
-  let phase           = 'idle';   // 'idle' | 'opening' | 'done'
+  let phase           = 'idle';   // 'idle' | 'spinning' | 'opening' | 'done'
   let openTimer       = 0;
+  let spinTimer       = 0;
+  let spinStartAngle  = 0;
+  let spinEndAngle    = 0;
+  const SPIN_DUR      = 2.4;     // seconds for spin-to-face animation
+  const SPIN_REVS     = 7;       // full rotations during spin
   let lastT           = 0;
   let revealShown     = false;
   let peekPlayed      = false;
@@ -927,19 +1044,49 @@
   // The camera orbits around FOCUS at a fixed radius.
   // Drag left/right → rotate azimuth; drag up/down → adjust elevation.
   const FOCUS   = new THREE.Vector3(0, 0.2, 0);
-  const ORBIT_R = 8.877;   // matches initial camera distance to FOCUS
+  let   orbitR  = 8.877;   // orbit radius — adjusted per box count
   const PHI_MIN = 0.12;    // ≈7°  — camera stays above the table
   const PHI_MAX = 1.05;    // ≈60° — max top-down angle
   let orbitTheta = 0;      // azimuth, rad  (0 = looking from +Z)
   let orbitPhi   = 0.394;  // elevation, rad (≈22.6°, matches initial camera)
+
+  // ── Per-box-count optimal camera ─────────────────────────────────────
+  // 3 boxes  → close & intimate, slightly elevated 3/4 view
+  // 6 boxes  → balanced mid-distance
+  // 9 boxes  → pulled back, higher angle to see full grid
+  function getOptimalCamera(n) {
+    const ls = innerWidth >= innerHeight;
+    if (n === 3) {
+      return ls
+        ? { radius: 7.0,  phi: 0.48, focusY: 0.0  }
+        : { radius: 7.8,  phi: 0.38, focusY: 0.0  };
+    } else if (n === 9) {
+      return ls
+        ? { radius: 11.0, phi: 0.50, focusY: 0.20 }
+        : { radius: 11.4, phi: 0.42, focusY: 0.35 };
+    } else { // 6
+      return ls
+        ? { radius: 8.8,  phi: 0.42, focusY: 0.10 }
+        : { radius: 9.4,  phi: 0.36, focusY: 0.25 };
+    }
+  }
+
+  function applyCameraPreset(n) {
+    const cam = getOptimalCamera(n);
+    orbitR     = cam.radius;
+    orbitPhi   = cam.phi;
+    orbitTheta = 0;          // reset to front view
+    FOCUS.y    = cam.focusY;
+    applyOrbit();
+  }
   let orbitVelX  = 0;      // inertia: azimuth delta per frame
   let orbitVelY  = 0;      // inertia: elevation delta per frame
 
   function applyOrbit() {
     camera.position.set(
-      FOCUS.x + ORBIT_R * Math.cos(orbitPhi) * Math.sin(orbitTheta),
-      FOCUS.y + ORBIT_R * Math.sin(orbitPhi),
-      FOCUS.z + ORBIT_R * Math.cos(orbitPhi) * Math.cos(orbitTheta)
+      FOCUS.x + orbitR * Math.cos(orbitPhi) * Math.sin(orbitTheta),
+      FOCUS.y + orbitR * Math.sin(orbitPhi),
+      FOCUS.z + orbitR * Math.cos(orbitPhi) * Math.cos(orbitTheta)
     );
     camera.lookAt(FOCUS);
   }
@@ -1000,27 +1147,32 @@
 
     // Dispose old
     boxes.forEach(b => {
-      b.solidMats.forEach(m => { m.map?.dispose(); m.dispose(); });
+      b.geometries.forEach(g => g.dispose());
+      b.materials.forEach(m => { m.map?.dispose(); m.dispose(); });
       b.glowMat.dispose();
       scene.remove(b.group);
     });
     boxes = [];
 
     currentPositions = getBoxPositions(N);
+    applyCameraPreset(N);
     const birthTime = performance.now();
 
     for (let i = 0; i < N; i++) {
       const ci  = i % PALETTE.length;
       const box = makeGiftBox(PALETTE[ci].c);
       box.group.position.copy(currentPositions[i]);
-      box.group.rotation.y = (Math.random() - 0.5) * 0.18;
-      box.group.rotation.z = (Math.random() - 0.5) * 0.06;
+      box.group.rotation.x = (Math.random() - 0.5) * 0.35;  // random tilt
+      box.group.rotation.y = Math.random() * Math.PI * 2;  // random facing
+      box.group.rotation.z = (Math.random() - 0.5) * 0.35;
       box.group.scale.setScalar(0);  // start collapsed for entrance animation
-      box.solidMats.forEach(m => { m.opacity = 1; });
+      box.materials.forEach(m => { m.opacity = 1; });
       box.glowMat.opacity = 0;
       scene.add(box.group);
 
-      boxes.push({ ...box, shop: currentShops[i], colorIdx: ci, birthTime });
+      const spinRate = 0.4 + Math.random() * 1.2;   // rad/s idle spin
+      const spinDir  = Math.random() < 0.5 ? 1 : -1;
+      boxes.push({ ...box, shop: currentShops[i], colorIdx: ci, birthTime, spinRate, spinDir });
     }
 
     phase        = 'idle';
@@ -1034,14 +1186,27 @@
   function openBox(idx) {
     if (phase !== 'idle' || !gameStarted || idx < 0) return;
     openedIdx    = idx;
-    phase        = 'opening';
-    openTimer    = 0;
+    phase        = 'spinning';
+    spinTimer    = 0;
     revealShown  = false;
     peekPlayed   = false;
     document.getElementById('roll-hint').classList.add('hidden');
     playPickSound();
-    // Pre-create peek element so the logo loads in the background
+
+    // Compute spin: fast rotations → decelerate → stop facing camera
     const b = boxes[idx];
+    spinStartAngle = b.group.rotation.y;
+    const targetAngle = Math.atan2(
+      camera.position.x - b.group.position.x,
+      camera.position.z - b.group.position.z
+    );
+    // Normalize delta to [-PI, PI], then add full revolutions
+    let delta = targetAngle - spinStartAngle;
+    delta = ((delta % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+    delta += SPIN_REVS * Math.PI * 2 * b.spinDir;
+    spinEndAngle = spinStartAngle + delta;
+
+    // Pre-create peek element so the logo loads in the background
     createPeekEl(b.shop, PALETTE[b.colorIdx].c);
   }
 
@@ -1083,14 +1248,42 @@
         b.group.position.x = pos.x;
         b.group.position.z = pos.z;
         b.group.position.y = pos.y + Math.sin(t * 1.1 + BOB_OFFSETS[i]) * 0.055;
+        // Continuous spin like a top
+        b.group.rotation.y += b.spinRate * b.spinDir * dt;
         // Hover scale × entrance scale
         const hoverScale = hoveredIdx === i ? 1.07 : 1.0;
         _sv.setScalar(entScale * hoverScale);
         b.group.scale.lerp(_sv, 0.12);
-        // Full opacity, no glow
-        b.solidMats.forEach(m => { m.opacity = 1; });
+        // Full opacity, no glow, lid closed
+        b.materials.forEach(m => { m.transparent = false; m.opacity = 1; });
         b.glowMat.opacity = 0;
-        b.lidGroup.position.y = LID_REST_Y;
+        b.lidPivot.rotation.x = 0;
+
+      } else if (phase === 'spinning') {
+        // Selected box: fast spin decelerating to face camera
+        // Other boxes: keep idle spin
+        const pos = currentPositions[i];
+        b.group.position.x = pos.x;
+        b.group.position.z = pos.z;
+        b.group.position.y = pos.y + Math.sin(t * 1.1 + BOB_OFFSETS[i]) * 0.055;
+
+        if (i === openedIdx) {
+          const st = Math.min(1, spinTimer / SPIN_DUR);
+          // ease-out quint — stays fast longer, very gradual deceleration at end
+          const eased = 1 - Math.pow(1 - st, 5);
+          b.group.rotation.y = spinStartAngle + (spinEndAngle - spinStartAngle) * eased;
+          // Smoothly level tilt back to upright as spin progresses
+          b.group.rotation.x *= (1 - st * 0.04);
+          b.group.rotation.z *= (1 - st * 0.04);
+          b.group.scale.setScalar(entScale);
+        } else {
+          b.group.rotation.y += b.spinRate * b.spinDir * dt;
+          _sv.setScalar(entScale);
+          b.group.scale.lerp(_sv, 0.12);
+        }
+        b.materials.forEach(m => { m.transparent = false; m.opacity = 1; });
+        b.glowMat.opacity = 0;
+        b.lidPivot.rotation.x = 0;
 
       } else if (phase === 'opening' || phase === 'done') {
         const prog = Math.min(1, openTimer / OPEN_DUR);
@@ -1098,17 +1291,9 @@
         b.group.position.set(pos.x, pos.y, pos.z);
 
         if (i === openedIdx) {
-          // Lid rises — ease-out cubic
+          // Lid hinges open on back-edge pivot
           const lidEase = 1 - Math.pow(1 - Math.min(1, prog * 1.4), 2.8);
-          b.lidGroup.position.y = LID_REST_Y + lidEase * 2.4;
-
-          // Lid fades in second half of animation
-          const lidOp = Math.max(0, 1 - Math.max(0, (prog - 0.38) / 0.62));
-          b.lidMat.opacity    = lidOp;
-          b.lidRibMat.opacity = lidOp;
-          b.bodyMat.opacity   = 1;
-          b.innerMat.opacity  = 1;
-          b.bodyRibMat.opacity = 1;
+          b.lidPivot.rotation.x = lidEase * b.lidOpenAngle;
           b.group.scale.setScalar(1);
 
           // Inner glow — fades in as lid clears (~22% into animation)
@@ -1128,10 +1313,19 @@
         } else {
           // Other boxes shrink and fade
           const sp = Math.min(1, prog * 2.8);
-          b.solidMats.forEach(m => { m.opacity = Math.max(0.04, 1 - sp * 0.90); });
+          b.materials.forEach(m => { m.transparent = true; m.opacity = Math.max(0.04, 1 - sp * 0.90); });
           b.glowMat.opacity = 0;
           b.group.scale.setScalar(Math.max(0.15, 1 - sp * 0.85));
         }
+      }
+    }
+
+    // Spin timer — transition to opening when spin finishes
+    if (phase === 'spinning') {
+      spinTimer += dt;
+      if (spinTimer >= SPIN_DUR) {
+        phase = 'opening';
+        openTimer = 0;
       }
     }
 
