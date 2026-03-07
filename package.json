@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && gh-pages -d dist"
+    "deploy": "npm run build && gh-pages -d dist",
+    "build:s3": "VITE_EXCLUDE_GAMES=makandice npm run build && rm -f dist/games/makandice.html && cd dist && zip -r ../MakanHub.zip ."
   },
   "dependencies": {
     "react": "^18.3.1",

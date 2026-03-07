@@ -16,7 +16,9 @@ import MakanClawThumbnail from '../components/thumbnails/MakanClawThumbnail'
  *
  * See AGENTS.md "## Adding a New Game" for the full guide.
  */
-export const GAMES: GameEntry[] = [
+const exclude = (import.meta.env.VITE_EXCLUDE_GAMES ?? '').split(',').filter(Boolean)
+
+export const GAMES: GameEntry[] = ([
   {
     id: 'makanbox',
     title: 'MakanBox',
@@ -72,4 +74,4 @@ export const GAMES: GameEntry[] = [
     thumbnailComponent: MakanClawThumbnail,
     url: 'games/makanclaw.html',
   },
-]
+] as GameEntry[]).filter(g => !exclude.includes(g.id))

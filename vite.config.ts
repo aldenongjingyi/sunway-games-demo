@@ -1,11 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Set VITE_BASE_PATH env var to override, e.g. for a different repo name.
-// Defaults to the current repo path for GitHub Pages.
-const base = process.env.VITE_BASE_PATH ?? (
-  process.env.NODE_ENV === 'production' ? '/compiled-with-selected-3-games/' : '/'
-)
+// './' makes the build portable — works on S3, GitHub Pages, any static host.
+// Override with VITE_BASE_PATH env var if needed (e.g. a sub-directory deploy).
+const base = process.env.VITE_BASE_PATH ?? './'
 
 export default defineConfig({
   plugins: [react()],
