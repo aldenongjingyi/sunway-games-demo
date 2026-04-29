@@ -3,3 +3,6 @@ dist/
 .env
 .env.local
 .DS_Store
+makanclaw-prod/node_modules/
+makanclaw-prod/dist/
+MakanHub.zip

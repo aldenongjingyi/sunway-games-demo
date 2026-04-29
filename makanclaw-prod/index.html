@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Makan Claw — Sunway Pyramid</title>
+</head>
+<body>
+
+<div id="loading-screen">
+  <div class="loading-logo">MAKAN CLAW</div>
+  <div class="loading-bar"><div class="loading-bar-inner"></div></div>
+</div>
+<div id="top-controls">
+  <div id="theme-switcher">
+    <button id="theme-btn" aria-label="Change theme">&#x1f3a8;</button>
+    <div id="theme-dropdown">
+      <button class="theme-option" data-theme="sunway-pyramid">Sunway Pyramid</button>
+      <button class="theme-option" data-theme="warm-arcade">Dark Arcade</button>
+      <button class="theme-option" data-theme="warm-arcade-2">Light Arcade</button>
+    </div>
+  </div>
+  <button id="sound-toggle" aria-label="Toggle sound">&#x1f50a;</button>
+</div>
+<canvas id="ambient-bg"></canvas>
+<div id="app">
+  <!-- TITLE SCREEN -->
+  <div id="title-screen">
+    <div class="brand-tag"><img src="/images/top-image.png" alt="Sunway Pyramid" class="brand-tag-logo"></div>
+    <div class="title-main">MAKAN<br>CLAW</div>
+    <div class="title-sub">Grab your meal</div>
+
+    <!-- Step progress bar -->
+    <div id="filter-wrap">
+      <!-- STEP 1: Dietary -->
+      <div class="filter-step" id="filter-step-1">
+        <ul class="steps">
+          <li class="step"><small>Step</small><span class="step-num active">1</span></li>
+          <li class="step"><small>Step</small><span class="step-num">2</span></li>
+          <li class="step"><small>Step</small><span class="step-num">3</span></li>
+        </ul>
+        <div class="step-title">
+          <img src="/images/swoosh-l.png" class="swoosh" alt="">
+          Choose your dietary needs!
+          <img src="/images/swoosh-r.png" class="swoosh" alt="">
+        </div>
+        <div class="step-subtitle">Have some dietary preferences? Choose below!</div>
+        <div class="step-options">
+          <button class="step-option fpill" data-catid="0">
+            <img src="/images/icons/cuisine-any.png" alt="Any">
+            <span>Any</span>
+          </button>
+          <button class="step-option fpill" data-catid="724">
+            <img src="/images/icons/halal.png" alt="Halal &amp; Pork-Free">
+            <span>Halal &amp; Pork-Free</span>
+          </button>
+        </div>
+        <button class="next-btn" id="next-step-1"><img src="/images/next-button.png" alt="Next"></button>
+      </div>
+
+      <!-- STEP 2: Cuisine -->
+      <div class="filter-step" id="filter-step-2" style="display:none">
+        <ul class="steps">
+          <li class="step"><small>Step</small><span class="step-num">1</span></li>
+          <li class="step"><small>Step</small><span class="step-num active">2</span></li>
+          <li class="step"><small>Step</small><span class="step-num">3</span></li>
+        </ul>
+        <div class="step-title">
+          <img src="/images/swoosh-l.png" class="swoosh" alt="">
+          Choose your desired cuisine!
+          <img src="/images/swoosh-r.png" class="swoosh" alt="">
+        </div>
+        <div class="step-subtitle">Feeling hungry for a type of cuisine? Choose from the options below!</div>
+        <div class="step-options">
+          <button class="step-option fpill" data-catid="0" data-cuisine>
+            <img src="/images/icons/surprise.png" alt="Surprise Me">
+            <span>Surprise Me</span>
+          </button>
+        </div>
+        <div class="kids-friendly-row">
+          <img src="/images/icons/kids-friendly.png" alt="Kids Friendly" class="kids-icon">
+          <div class="kids-text">
+            <strong>Kids Friendly</strong><br>
+            <span>Want the eatery to be comfortable for your kids as well?</span>
+          </div>
+          <button class="kids-toggle fpill" id="kids-toggle" data-catid="728">Yes</button>
+        </div>
+        <div class="step-options-grid">
+          <button class="step-option fpill" data-catid="733">
+            <img src="/images/icons/snack.png" alt="Snack">
+            <span>Snack</span>
+          </button>
+          <button class="step-option fpill" data-catid="730">
+            <img src="/images/icons/local.png" alt="Local">
+            <span>Local</span>
+          </button>
+          <button class="step-option fpill" data-catid="737">
+            <img src="/images/icons/western.png" alt="Western">
+            <span>Western</span>
+          </button>
+          <button class="step-option fpill" data-catid="723">
+            <img src="/images/icons/fastfood.png" alt="Fast Food">
+            <span>Fast Food</span>
+          </button>
+          <button class="step-option fpill" data-catid="727">
+            <img src="/images/icons/asian.png" alt="Asian &amp; Japanese">
+            <span>Asian &amp; Japanese</span>
+          </button>
+          <button class="step-option fpill" data-catid="719">
+            <img src="/images/icons/cafe.png" alt="Caf&eacute;">
+            <span>Caf&eacute;</span>
+          </button>
+        </div>
+        <p id="filter-count"></p>
+        <button class="next-btn" id="next-step-2"><img src="/images/next-button.png" alt="Grab"></button>
+      </div>
+    </div>
+
+    <button class="neon-btn" id="play-btn" style="display:none">TAP TO PLAY</button>
+    <div class="title-capsules">
+      <div class="mini-capsule"></div>
+      <div class="mini-capsule"></div>
+      <div class="mini-capsule"></div>
+      <div class="mini-capsule"></div>
+      <div class="mini-capsule"></div>
+    </div>
+  </div>
+
+  <!-- GAME SCREEN -->
+  <div id="game-screen">
+    <div class="game-step-header">
+      <ul class="steps">
+        <li class="step"><small>Step</small><span class="step-num">1</span></li>
+        <li class="step"><small>Step</small><span class="step-num">2</span></li>
+        <li class="step"><small>Step</small><span class="step-num active">3</span></li>
+      </ul>
+      <div class="step-title">
+        <img src="/images/swoosh-l.png" class="swoosh" alt="">
+        Grab your meal!
+        <img src="/images/swoosh-r.png" class="swoosh" alt="">
+      </div>
+      <div class="step-subtitle">You're all set! Drag to aim, then drop!</div>
+    </div>
+    <div class="machine-wrapper">
+      <div class="machine-body">
+        <canvas id="game-canvas"></canvas>
+        <div class="game-hud">
+          <div class="attempt-dots" id="attempt-dots">
+            <span class="adot active"></span>
+            <span class="adot"></span>
+            <span class="adot"></span>
+          </div>
+          <div class="cuisine-badge" id="cuisine-badge">ALL</div>
+        </div>
+        <div class="status-message" id="status-msg"></div>
+      </div>
+    </div>
+    <div class="controls-area">
+      <button id="drop-btn">&#9660; DROP &#9660;</button>
+      <div class="instruction-text" id="instruction-text">
+        <span class="arrow-icon">&#9664;</span> DRAG TO AIM <span class="arrow-icon">&#9654;</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULT SCREEN -->
+  <div id="result-screen">
+    <div class="result-header">IT'S A MATCH!</div>
+    <div class="result-card">
+      <img class="result-logo" id="result-logo" src="" alt="" style="display:none">
+      <div class="result-emoji" id="result-emoji">&#127836;</div>
+      <div class="restaurant-name" id="result-name">-</div>
+      <div class="restaurant-cuisine" id="result-cuisine">-</div>
+      <div class="restaurant-location" id="result-location">&#128205; -</div>
+    </div>
+    <div class="result-buttons">
+      <button class="btn-primary" id="replay-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <!-- CAPSULE OPEN OVERLAY -->
+  <div id="capsule-open-overlay">
+    <div class="capsule-open-scene">
+      <div class="capsule-light-rays" id="capsule-rays"></div>
+      <div class="capsule-glow-ring" id="capsule-glow"></div>
+      <div class="capsule-half capsule-half-left" id="capsule-left">
+        <div class="capsule-half-inner" id="capsule-left-inner"></div>
+      </div>
+      <div class="capsule-half capsule-half-right" id="capsule-right">
+        <div class="capsule-half-inner" id="capsule-right-inner"></div>
+      </div>
+      <div class="capsule-open-emoji" id="capsule-emoji"></div>
+      <div class="capsule-open-label" id="capsule-label">OPENING...</div>
+    </div>
+  </div>
+
+  <canvas id="confetti-canvas"></canvas>
+  <div class="flash-overlay" id="flash-overlay"></div>
+</div>
+
+<div class="landscape-blocker" id="landscape-blocker">
+  <div class="rotate-icon">&#128241;</div>
+  <div>PLEASE ROTATE<br>YOUR DEVICE</div>
+  <div style="font-size: 11px; color: rgba(0,0,0,0.3);">Portrait mode required</div>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
