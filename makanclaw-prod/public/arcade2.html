@@ -1033,7 +1033,14 @@ html { scrollbar-width: none; }
       <button class="theme-opt" data-href="/arcade2.html" style="display:block;width:100%;padding:12px 16px;border:none;background:none;cursor:pointer;font-family:'Orbitron',sans-serif;font-size:12px;color:#EB1C24;text-align:left;font-weight:bold">Light Arcade</button>
     </div>
   </div>
-  <button id="special-toggle" aria-label="Toggle special balls" title="Special Balls" style="width:36px;height:36px;border-radius:50%;border:1px solid rgba(0,0,0,0.08);background:rgba(255,255,255,0.85);color:#ccc;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);transition:all 0.2s">&#x2B50;</button>
+  <div style="position:relative">
+    <button id="ball-btn" aria-label="Ball style" title="Ball Style" style="width:36px;height:36px;border-radius:50%;border:1px solid rgba(0,0,0,0.08);background:rgba(255,255,255,0.85);color:#EB1C24;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);transition:all 0.2s">&#x26AA;</button>
+    <div id="ball-dropdown" style="display:none;position:absolute;top:42px;right:0;background:#FFFFFF;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.12);min-width:170px;overflow:hidden;border:1px solid rgba(0,0,0,0.06);z-index:601">
+      <button class="ball-opt" data-mode="red" style="display:flex;align-items:center;gap:8px;width:100%;padding:11px 14px;border:none;background:none;cursor:pointer;font-family:'Orbitron',sans-serif;font-size:11px;color:#7A7068;text-align:left"><span style="font-size:16px">&#x1F534;</span> Red Only</button>
+      <button class="ball-opt" data-mode="colourful" style="display:flex;align-items:center;gap:8px;width:100%;padding:11px 14px;border:none;background:none;cursor:pointer;font-family:'Orbitron',sans-serif;font-size:11px;color:#7A7068;text-align:left"><span style="font-size:16px">&#x1F308;</span> Colourful</button>
+      <button class="ball-opt" data-mode="special" style="display:flex;align-items:center;gap:8px;width:100%;padding:11px 14px;border:none;background:none;cursor:pointer;font-family:'Orbitron',sans-serif;font-size:11px;color:#7A7068;text-align:left"><span style="font-size:16px">&#x2B50;</span> Special Balls</button>
+    </div>
+  </div>
   <button id="sound-toggle" aria-label="Toggle sound">&#x1f50a;</button>
 </div>
 <script>
@@ -1047,20 +1054,46 @@ html { scrollbar-width: none; }
   });b.addEventListener('mouseenter',function(){b.style.background='rgba(0,0,0,0.04)'});
   b.addEventListener('mouseleave',function(){b.style.background='none'})});
 
-  // Special balls toggle
-  var _sb = document.getElementById('special-toggle');
-  window._specialBallsEnabled = localStorage.getItem('makanclaw-special') === 'true';
-  function _updateSpecialBtn() {
-    _sb.style.color = window._specialBallsEnabled ? '#D4A520' : '#ccc';
-    _sb.style.borderColor = window._specialBallsEnabled ? '#D4A520' : 'rgba(0,0,0,0.08)';
-    _sb.style.background = window._specialBallsEnabled ? 'rgba(212,165,32,0.1)' : 'rgba(255,255,255,0.85)';
+  // Ball style dropdown
+  var _ballBtn = document.getElementById('ball-btn');
+  var _ballDd = document.getElementById('ball-dropdown');
+  window._ballMode = localStorage.getItem('makanclaw-ballmode') || 'red';
+  window._specialBallsEnabled = window._ballMode === 'special';
+
+  var _ballIcons = { red: '\u{1F534}', colourful: '\u{1F308}', special: '\u2B50' };
+  var _ballColors = { red: '#EB1C24', colourful: '#8B5CF6', special: '#D4A520' };
+
+  function _updateBallBtn() {
+    _ballBtn.textContent = _ballIcons[window._ballMode] || '\u26AA';
+    _ballBtn.style.color = _ballColors[window._ballMode] || '#ccc';
+    _ballBtn.style.borderColor = _ballColors[window._ballMode] || 'rgba(0,0,0,0.08)';
+    // Mark active option
+    document.querySelectorAll('.ball-opt').forEach(function(o) {
+      var isActive = o.dataset.mode === window._ballMode;
+      o.style.fontWeight = isActive ? 'bold' : 'normal';
+      o.style.color = isActive ? _ballColors[o.dataset.mode] : '#7A7068';
+    });
   }
-  _updateSpecialBtn();
-  _sb.onclick = function() {
-    window._specialBallsEnabled = !window._specialBallsEnabled;
-    localStorage.setItem('makanclaw-special', window._specialBallsEnabled);
-    _updateSpecialBtn();
+  _updateBallBtn();
+
+  _ballBtn.onclick = function(e) {
+    e.stopPropagation();
+    _ballDd.style.display = _ballDd.style.display === 'none' ? 'block' : 'none';
+    _dd.style.display = 'none'; // close theme dropdown
   };
+  document.querySelectorAll('.ball-opt').forEach(function(b) {
+    b.addEventListener('click', function() {
+      window._ballMode = b.dataset.mode;
+      window._specialBallsEnabled = window._ballMode === 'special';
+      localStorage.setItem('makanclaw-ballmode', window._ballMode);
+      _ballDd.style.display = 'none';
+      _updateBallBtn();
+    });
+    b.addEventListener('mouseenter', function() { b.style.background = 'rgba(0,0,0,0.04)'; });
+    b.addEventListener('mouseleave', function() { b.style.background = 'none'; });
+  });
+  // Close on outside click
+  document.addEventListener('click', function() { _ballDd.style.display = 'none'; });
 </script>
 <canvas id="ambient-bg"></canvas>
 <div id="app">
@@ -1208,7 +1241,8 @@ html { scrollbar-width: none; }
         <div id="voucher-expiry" style="font-size:11px;color:var(--text-dim);margin-bottom:14px;">-</div>
         <img id="voucher-image" style="display:none;width:100%;max-height:120px;object-fit:cover;border-radius:8px;margin-bottom:14px;" />
         <div id="redeem-form">
-          <input id="phone-input" type="tel" placeholder="Fill in your phone number to redeem this voucher!" style="width:100%;padding:12px 16px;border:1px solid rgba(0,0,0,0.12);border-radius:8px;font-size:14px;font-family:inherit;outline:none;margin-bottom:10px;text-align:center;" />
+          <input id="phone-input" type="tel" placeholder="Enter phone number" style="width:100%;padding:12px 16px;border:1px solid rgba(0,0,0,0.12);border-radius:8px;font-size:14px;font-family:inherit;outline:none;margin-bottom:4px;text-align:center;" />
+          <div style="font-size:11px;color:#999;font-style:italic;margin-bottom:10px;">Fill in your phone number to redeem this voucher</div>
           <div id="redeem-error" style="display:none;color:#EB1C24;font-size:12px;margin-bottom:8px;"></div>
         </div>
         <div id="redeem-success" style="display:none;padding:16px;background:rgba(6,214,160,0.1);border-radius:8px;color:#06856A;font-size:14px;font-weight:600;text-align:center;">
@@ -1405,11 +1439,21 @@ const CAT_LABEL_PRIORITY = [
   [733,'🍿'],[724,'🌙'],[732,'✅'],[728,'👦'],[735,'🥗'],
 ];
 
-const CAPSULE_COLORS = [
+const CAPSULE_COLORS_RED = [
   '#EB1C24', '#EB1C24', '#EB1C24', '#EB1C24',
   '#EB1C24', '#EB1C24', '#EB1C24', '#EB1C24',
   '#EB1C24', '#EB1C24', '#EB1C24', '#EB1C24'
 ];
+const CAPSULE_COLORS_COLOURFUL = [
+  '#EB1C24', '#FF9441', '#D4A520', '#06D6A0',
+  '#3498DB', '#8B5CF6', '#EC4899', '#F97316',
+  '#14B8A6', '#6366F1', '#E11D48', '#FACC15'
+];
+function getCapsuleColors() {
+  if (window._ballMode === 'colourful') return CAPSULE_COLORS_COLOURFUL;
+  return CAPSULE_COLORS_RED;
+}
+const CAPSULE_COLORS = getCapsuleColors();
 
 // ============================================
 // FILTER SYSTEM (shared with other games)
@@ -2045,8 +2089,10 @@ class MakanClawGame {
     const balls = this.gameBalls.length > 0 ? this.gameBalls : [];
     let source;
     if (balls.length > 0) {
-      // API-driven: duplicate balls to fill the machine
-      const pool = [...balls, ...balls];
+      // API-driven: duplicate normal balls to fill machine, keep only 1 special
+      const normalBalls = balls.filter(b => b.type !== 'special');
+      const specialBalls = balls.filter(b => b.type === 'special');
+      const pool = [...normalBalls, ...normalBalls, ...specialBalls];
       source = pool.sort(() => Math.random() - 0.5);
     } else {
       // Fallback: use filtered shops directly
@@ -2063,7 +2109,7 @@ class MakanClawGame {
       this.capsules.push({
         x, y: -r * 2 - Math.random() * 80,
         vx: (Math.random() - 0.5) * 10, vy: 0, r,
-        color: isSpecial ? '#D4A520' : CAPSULE_COLORS[i % CAPSULE_COLORS.length],
+        color: isSpecial ? '#D4A520' : getCapsuleColors()[i % getCapsuleColors().length],
         shop: ball.shop || ball, grabbed: false, frozen: true,
         dropDelay: i * 0.06 + Math.random() * 0.04,
         scaleX: 1, scaleY: 1, idlePhase: Math.random() * Math.PI * 2,
